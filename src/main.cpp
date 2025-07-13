@@ -323,7 +323,7 @@ void resetGame() {
     game.has_food = false;  // Start with no food
     game.food_x = -1;
     game.food_y = -1;
-    
+    if (game.crashed) return;
     // Spawn initial food immediately after reset
     spawnFood();
 }
