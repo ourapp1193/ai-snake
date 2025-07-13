@@ -321,8 +321,8 @@ void resetGame() {
     game.trail = {{game.head_x, game.head_y}};
     game.crashed = false;
     game.has_food = false;  // Start with no food
-    game.food_x = -1;
-    game.food_y = -1;
+    // game.food_x = -1;
+    // game.food_y = -1;
     // Spawn initial food immediately after reset
 }
 
@@ -596,7 +596,7 @@ int main() {
         }
 
         if (crashed) {
-            spawnFood();
+            reset_timer = 5;
         }
 
         SDL_Event event;
