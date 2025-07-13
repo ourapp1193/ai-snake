@@ -331,7 +331,7 @@ bool moveSnake(int& direction) {
 
     // Spawn first food only when game starts and there's none
     if (!game.has_food && game.steps_since_last_food == 0 && !game.crashed) {
-        spawnFood();
+        //spawnFood();
         return false;
     }
 
