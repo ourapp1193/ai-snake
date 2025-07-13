@@ -314,6 +314,7 @@ void resetGame() {
     // Spawn initial food immediately after reset
     spawnFood();
 }
+
 void spawnFood() {
     if (game.has_food) return; // Don't spawn if food exists
 
@@ -525,39 +526,6 @@ void mainLoop() {
 
     if (reset_timer > 0) {
         reset_timer--;
-        // if (reset_timer == 0) {
-        //     resetGame();
-        // }
-        return;
-    }
-
-    bool crashed = moveSnake(direction);
-    drawGame();
-
-    if (q_learning.episodes < MAX_TRAINING_EPISODES) {
-        q_learning.episodes++;
-        q_learning.exploration_rate = max(MIN_EXPLORATION, 
-                                         q_learning.exploration_rate * q_learning.exploration_decay);
-        logPerformance();
-    }
-
-    if (crashed) {
-        reset_timer = 5;
-    }
-}
-
-void cleanup() {
-    SDL_DestroyRenderer(sdl.renderer);
-    SDL_DestroyWindow(sdl.window);
-    SDL_Quit();
-}
-
-void mainLoop() {
-    static int direction = rand() % 4;
-    static int reset_timer = 0;
-
-    if (reset_timer > 0) {
-        reset_timer--;
         if (reset_timer == 0) {
             resetGame();  // This now includes initial food spawn
         }
@@ -579,4 +547,68 @@ void mainLoop() {
     if (crashed) {
         reset_timer = 5;
     }
+}
+
+void cleanup() {
+    SDL_DestroyRenderer(sdl.renderer);
+    SDL_DestroyWindow(sdl.window);
+    SDL_Quit();
+}
+
+int main() {
+    srand((unsigned)time(nullptr));
+
+    #ifdef __EMSCRIPTEN__
+    export_functions();
+    initChartJS();
+    #endif
+
+    initQTable();
+    initSDL();
+    resetGame(); // No initial spawn here
+
+    #ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop(mainLoop, 0, 1);
+    #else
+    int direction = rand() % 4;
+    int reset_timer = 0;
+    
+    bool running = true;
+    while (running) {
+        if (reset_timer > 0) {
+            reset_timer--;
+            if (reset_timer == 0) {
+                resetGame();
+                //spawnFood();
+            }
+            SDL_Delay(game.speed);
+            continue;
+        }
+
+        bool crashed = moveSnake(direction);
+        drawGame();
+        SDL_Delay(game.speed);
+
+        if (q_learning.episodes < MAX_TRAINING_EPISODES) {
+            q_learning.episodes++;
+            q_learning.exploration_rate = max(MIN_EXPLORATION, 
+                                            q_learning.exploration_rate * q_learning.exploration_decay);
+            logPerformance();
+        }
+
+        if (crashed) {
+            reset_timer = 5;
+        }
+
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT) {
+                running = false;
+            }
+        }
+    }
+    #endif
+
+    cleanup();
+    return 0;
 }
