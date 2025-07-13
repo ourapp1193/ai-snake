@@ -317,7 +317,7 @@ void spawnFood() {
 
     auto all_positions = generateAllPositions();
     auto free_positions = getFreePositions(game.trail, all_positions);
-    if (!free_positions.empty() && !game.crashed) {
+    if (!free_positions.empty()) {
         int k = rand() % free_positions.size();
         game.food_x = free_positions[k][0];
         game.food_y = free_positions[k][1];
@@ -574,7 +574,7 @@ int main() {
             reset_timer--;
             if (reset_timer == 0) {
                 resetGame();
-                spawnFood();
+                //spawnFood();
             }
             SDL_Delay(game.speed);
             continue;
