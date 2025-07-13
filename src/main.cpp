@@ -24,6 +24,7 @@ const int AI_UPDATE_INTERVAL = 5;
 const int LOG_INTERVAL = 100;
 const int MAX_TRAINING_EPISODES = 5000000;
 const float MIN_EXPLORATION = 0.0001f;
+bool urobos = false;
 
 struct GameState {
     int head_x = HEIGHT / 2;
@@ -308,6 +309,7 @@ void resetGame() {
     game.trail = {{game.head_x, game.head_y}};
     game.crashed = false;
     game.has_food = false;
+    urobos = false;
 }
 
 void spawnFood() {
@@ -389,7 +391,8 @@ bool moveSnake(int& direction) {
         game.crashed = true;
         return true;
     }
-
+    if (isBodyPosition(game.head_x, game.head_y, false)) urobos = true;
+    
     game.trail.insert(game.trail.begin(), {game.head_x, game.head_y});
     if (game.trail.size() > game.length + 2) {
         game.trail.resize(game.length + 2);
