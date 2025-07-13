@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>AI Snake Training</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #222;
+            color: white;
+        }
+
+        #container {
+            display: flex;
+            width: 100%;
+        }
+
+        #status {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #333;
+            border-radius: 5px;
+        }
+
+        #game-canvas {
+            display: block;
+            margin: 20px auto;
+            background: black;
+        }
+
+        #loading {
+            text-align: center;
+            margin: 20px;
+            font-size: 18px;
+        }
+
+        #chart-container {
+            display: flex;
+            margin-top: 20px;
+        }
+
+        .chart {
+            height: 130px;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="status" class="hidden">Loading game...</div>
+    <div id="container">
+
+        <canvas id="game-canvas" width="400" height="400" class="hidden"></canvas>
+        <div id="chart-container" class="hidden">
+            <div class="chart">
+                <canvas id="scoreChart"></canvas>
+            </div>
+            <div class="chart">
+                <canvas id="qValueChart"></canvas>
+            </div>
+            <div class="chart">
+                <canvas id="lifetimeChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var Module = {
+            canvas: (function () {
+                var canvas = document.getElementById('game-canvas');
+                canvas.addEventListener('webglcontextlost', function (e) {
+                    alert('WebGL context lost. Please reload the page.');
+                    e.preventDefault();
+                }, false);
+                return canvas;
+            })(),
+
+            onRuntimeInitialized: function () {
+                // Hide loading indicator
+                var loadingElement = document.getElementById('loading');
+                if (loadingElement) loadingElement.classList.add('hidden');
+
+                // Show game elements
+                var statusElement = document.getElementById('status');
+                var canvasElement = document.getElementById('game-canvas');
+                var chartContainer = document.getElementById('chart-container');
+
+                if (statusElement) {
+                    statusElement.classList.remove('hidden');
+                    statusElement.textContent = 'Game loaded - training started';
+                }
+
+                if (canvasElement) {
+                    canvasElement.classList.remove('hidden');
+                }
+
+                if (chartContainer) {
+                    chartContainer.classList.remove('hidden');
+                }
+            },
+
+            printErr: function (text) {
+                console.error(text);
+                var statusElement = document.getElementById('status');
+                if (statusElement) statusElement.textContent = 'Error: ' + text;
+            }
+        };
+    </script>
+
+    {{{ SCRIPT }}}
+</body>
+
+</html>
