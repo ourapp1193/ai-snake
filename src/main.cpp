@@ -313,7 +313,7 @@ void resetGame() {
 }
 
 void spawnFood() {
-    if (game.has_food) return; // Don't spawn if food exists
+    if (game.has_food || game.crashed) return; // Don't spawn if food exists
 
     auto all_positions = generateAllPositions();
     auto free_positions = getFreePositions(game.trail, all_positions);
@@ -331,7 +331,7 @@ bool moveSnake(int& direction) {
 
     // Spawn first food only when game starts
     if (!game.has_food && game.steps_since_last_food == 0) {
-        //spawnFood();
+        spawnFood();
         return false;
     }
 
@@ -523,9 +523,9 @@ void mainLoop() {
 
     if (reset_timer > 0) {
         reset_timer--;
-        if (reset_timer == 0) {
-            resetGame();
-        }
+        // if (reset_timer == 0) {
+        //     resetGame();
+        // }
         return;
     }
 
