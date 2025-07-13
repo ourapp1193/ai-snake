@@ -313,11 +313,11 @@ void resetGame() {
 }
 
 void spawnFood() {
-    if (game.has_food) return; // Don't spawn if food already exists
+    if (game.has_food || game.crashed) return; // Don't spawn if food already exists
 
     auto all_positions = generateAllPositions();
     auto free_positions = getFreePositions(game.trail, all_positions);
-    if (!free_positions.empty() && (!game.crashed && !urobos)) {
+    if (!free_positions.empty()) {
         int k = rand() % free_positions.size();
         game.food_x = free_positions[k][0];
         game.food_y = free_positions[k][1];
@@ -392,7 +392,7 @@ bool moveSnake(int& direction) {
         game.crashed = true;
         return true;
     }
-    if (isBodyPosition(game.head_x, game.head_y, false)) urobos = true;
+    //if (isBodyPosition(game.head_x, game.head_y, false)) urobos = true;
     
     game.trail.insert(game.trail.begin(), {game.head_x, game.head_y});
     if (game.trail.size() > game.length + 2) {
