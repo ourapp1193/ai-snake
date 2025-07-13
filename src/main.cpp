@@ -521,6 +521,7 @@ void mainLoop() {
         reset_timer--;
         if (reset_timer == 0) {
             resetGame();
+            if (!game.crashed)
             spawnFood(); // Spawn initial food on reset
         }
         return;
