@@ -596,7 +596,7 @@ int main() {
         }
 
         if (crashed) {
-            reset_timer = 5;
+            spawnFood();
         }
 
         SDL_Event event;
