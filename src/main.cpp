@@ -38,6 +38,7 @@ struct GameState {
     int lifetime_score = 0;
     int steps_since_last_food = 0;
     bool has_food = false;
+    bool just_ate = false;
 };
 
 struct QLearning {
@@ -299,7 +300,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
 }
 
 void spawnFood() {
-    if (game.has_food) return; // Don't spawn if food exists
+    if (game.has_food) return;
 
     auto all_positions = generateAllPositions();
     auto free_positions = getFreePositions(game.trail, all_positions);
@@ -320,19 +321,17 @@ void resetGame() {
     game.body = {{game.head_x, game.head_y}};
     game.trail = {{game.head_x, game.head_y}};
     game.crashed = false;
-    game.has_food = false;  // Start with no food
-    // game.food_x = -1;
-    // game.food_y = -1;
-    // Spawn initial food immediately after reset
+    game.has_food = false;
+    game.just_ate = false;
 }
 
 bool moveSnake(int& direction) {
     static int frame = 0;
     frame++;
 
-    // Spawn first food only when game starts
-    if (!game.has_food && game.steps_since_last_food == 0) {
-        //spawnFood();
+    // Spawn first food only when game starts and there's none
+    if (!game.has_food && game.steps_since_last_food == 0 && !game.crashed) {
+        spawnFood();
         return false;
     }
 
@@ -415,7 +414,13 @@ bool moveSnake(int& direction) {
         game.length++;
         game.steps_since_last_food = 0;
         game.has_food = false;
-        spawnFood(); // ONLY place where new food spawns
+        game.just_ate = true;
+    }
+
+    // Only spawn new food if we just ate (not on crash)
+    if (game.just_ate && !game.crashed) {
+        spawnFood();
+        game.just_ate = false;
     }
 
     if (game.steps_since_last_food > 200) {
@@ -522,13 +527,13 @@ void mainLoop() {
     static int direction = rand() % 4;
     static int reset_timer = 0;
 
-    // if (reset_timer > 0) {
-    //     reset_timer--;
-    //     if (reset_timer == 0) {
-    //         resetGame();  // This now includes initial food spawn
-    //     }
-    //     return;
-    // }
+    if (reset_timer > 0) {
+        reset_timer--;
+        if (reset_timer == 0) {
+            resetGame();
+        }
+        return;
+    }
 
     bool crashed = moveSnake(direction);
     drawGame();
@@ -544,7 +549,6 @@ void mainLoop() {
 
     if (crashed) {
         reset_timer = 5;
-        resetGame();
     }
 }
 
@@ -564,40 +568,16 @@ int main() {
 
     initQTable();
     initSDL();
-    //resetGame(); // No initial spawn here
-    spawnFood();
+    resetGame();
+    spawnFood(); // Initial food spawn only
+
     #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop(mainLoop, 0, 1);
     #else
-    int direction = rand() % 4;
-    int reset_timer = 0;
-    
     bool running = true;
     while (running) {
-        if (reset_timer > 0) {
-            reset_timer--;
-            // if (reset_timer == 0) {
-            //     resetGame();
-            //     //spawnFood();
-            // }
-            SDL_Delay(game.speed);
-            continue;
-        }
-
-        bool crashed = moveSnake(direction);
-        drawGame();
+        mainLoop();
         SDL_Delay(game.speed);
-
-        if (q_learning.episodes < MAX_TRAINING_EPISODES) {
-            q_learning.episodes++;
-            q_learning.exploration_rate = max(MIN_EXPLORATION, 
-                                            q_learning.exploration_rate * q_learning.exploration_decay);
-            logPerformance();
-        }
-
-        if (crashed) {
-            reset_timer = 5;
-        }
 
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
