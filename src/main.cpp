@@ -522,7 +522,7 @@ void logPerformance() {
 
 void mainLoop() {
     static int direction = rand() % 4;
-    // static int reset_timer = 0;
+    static int reset_timer = 0;
 
     // if (reset_timer > 0) {
     //     reset_timer--;
@@ -546,6 +546,7 @@ void mainLoop() {
 
     if (crashed) {
         reset_timer = 5;
+        resetgame();
     }
 }
 
