@@ -313,7 +313,7 @@ void resetGame() {
 }
 
 void spawnFood() {
-    if (game.has_food || game.crashed) return;
+    if (game.has_food) return; // Don't spawn if food exists
 
     auto all_positions = generateAllPositions();
     auto free_positions = getFreePositions(game.trail, all_positions);
@@ -329,9 +329,10 @@ bool moveSnake(int& direction) {
     static int frame = 0;
     frame++;
 
-    // Spawn first food if none exists
+    // Spawn first food only when game starts
     if (!game.has_food && game.steps_since_last_food == 0) {
         spawnFood();
+        return false;
     }
 
     int prev_x = game.head_x;
@@ -413,7 +414,7 @@ bool moveSnake(int& direction) {
         game.length++;
         game.steps_since_last_food = 0;
         game.has_food = false;
-        spawnFood(); // ONLY food spawn point in entire code
+        spawnFood(); // ONLY place where new food spawns
     }
 
     if (game.steps_since_last_food > 200) {
@@ -559,7 +560,7 @@ int main() {
 
     initQTable();
     initSDL();
-    resetGame(); // No initial spawnFood() call here
+    resetGame(); // No initial spawn here
 
     #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop(mainLoop, 0, 1);
