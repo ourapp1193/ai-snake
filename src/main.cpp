@@ -298,6 +298,19 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     return dist_reward + body_penalty + time_reward;
 }
 
+void spawnFood() {
+    if (game.has_food) return; // Don't spawn if food exists
+
+    auto all_positions = generateAllPositions();
+    auto free_positions = getFreePositions(game.trail, all_positions);
+    if (!free_positions.empty()) {
+        int k = rand() % free_positions.size();
+        game.food_x = free_positions[k][0];
+        game.food_y = free_positions[k][1];
+        game.has_food = true;
+    }
+}
+
 void resetGame() {
     game.head_x = HEIGHT / 2;
     game.head_y = WIDTH / 2;
@@ -313,19 +326,6 @@ void resetGame() {
     
     // Spawn initial food immediately after reset
     spawnFood();
-}
-
-void spawnFood() {
-    if (game.has_food) return; // Don't spawn if food exists
-
-    auto all_positions = generateAllPositions();
-    auto free_positions = getFreePositions(game.trail, all_positions);
-    if (!free_positions.empty()) {
-        int k = rand() % free_positions.size();
-        game.food_x = free_positions[k][0];
-        game.food_y = free_positions[k][1];
-        game.has_food = true;
-    }
 }
 
 bool moveSnake(int& direction) {
