@@ -24,7 +24,6 @@ const int AI_UPDATE_INTERVAL = 5;
 const int LOG_INTERVAL = 100;
 const int MAX_TRAINING_EPISODES = 5000000;
 const float MIN_EXPLORATION = 0.0001f;
-bool urobos = false;
 
 struct GameState {
     int head_x = HEIGHT / 2;
@@ -309,11 +308,12 @@ void resetGame() {
     game.trail = {{game.head_x, game.head_y}};
     game.crashed = false;
     game.has_food = false;
-    urobos = false;
+    game.food_x = -1;
+    game.food_y = -1;
 }
 
 void spawnFood() {
-    if (game.has_food || game.crashed) return; // Don't spawn if food already exists
+    if (game.has_food || game.crashed) return;
 
     auto all_positions = generateAllPositions();
     auto free_positions = getFreePositions(game.trail, all_positions);
@@ -328,6 +328,11 @@ void spawnFood() {
 bool moveSnake(int& direction) {
     static int frame = 0;
     frame++;
+
+    // Spawn first food if none exists
+    if (!game.has_food && game.steps_since_last_food == 0) {
+        spawnFood();
+    }
 
     int prev_x = game.head_x;
     int prev_y = game.head_y;
@@ -368,7 +373,6 @@ bool moveSnake(int& direction) {
                 if (isValidPosition(test_x, test_y) && !isBodyPosition(test_x, test_y, false)) {
                     safe_actions.push_back(i);
                 }
-                if (isBodyPosition(test_x, test_y, false)) urobos = true;
             }
             if (!safe_actions.empty()) {
                 direction = safe_actions[rand() % safe_actions.size()];
@@ -392,8 +396,7 @@ bool moveSnake(int& direction) {
         game.crashed = true;
         return true;
     }
-    //if (isBodyPosition(game.head_x, game.head_y, false)) urobos = true;
-    
+
     game.trail.insert(game.trail.begin(), {game.head_x, game.head_y});
     if (game.trail.size() > game.length + 2) {
         game.trail.resize(game.length + 2);
@@ -409,8 +412,8 @@ bool moveSnake(int& direction) {
         game.lifetime_score++;
         game.length++;
         game.steps_since_last_food = 0;
-        game.has_food = false; // Mark food as eaten
-        spawnFood(); // Spawn new food only when eaten
+        game.has_food = false;
+        spawnFood(); // ONLY food spawn point in entire code
     }
 
     if (game.steps_since_last_food > 200) {
@@ -521,8 +524,6 @@ void mainLoop() {
         reset_timer--;
         if (reset_timer == 0) {
             resetGame();
-            if (!game.crashed)
-            spawnFood(); // Spawn initial food on reset
         }
         return;
     }
@@ -558,8 +559,7 @@ int main() {
 
     initQTable();
     initSDL();
-    resetGame();
-    spawnFood(); // Initial food spawn
+    resetGame(); // No initial spawnFood() call here
 
     #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop(mainLoop, 0, 1);
@@ -573,7 +573,6 @@ int main() {
             reset_timer--;
             if (reset_timer == 0) {
                 resetGame();
-                spawnFood();
             }
             SDL_Delay(game.speed);
             continue;
