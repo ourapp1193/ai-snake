@@ -578,10 +578,10 @@ int main() {
     while (running) {
         if (reset_timer > 0) {
             reset_timer--;
-            if (reset_timer == 0) {
-                resetGame();
-                //spawnFood();
-            }
+            // if (reset_timer == 0) {
+            //     resetGame();
+            //     //spawnFood();
+            // }
             SDL_Delay(game.speed);
             continue;
         }
