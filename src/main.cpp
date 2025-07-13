@@ -546,7 +546,7 @@ void mainLoop() {
 
     if (crashed) {
         reset_timer = 5;
-        resetgame();
+        resetGame();
     }
 }
 
