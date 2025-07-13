@@ -300,7 +300,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
 }
 
 void spawnFood() {
-    if (game.has_food) return;
+    if (game.has_food || game.crashed) return;
 
     auto all_positions = generateAllPositions();
     auto free_positions = getFreePositions(game.trail, all_positions);
