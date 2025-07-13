@@ -564,8 +564,8 @@ int main() {
 
     initQTable();
     initSDL();
-    resetGame(); // No initial spawn here
-
+    //resetGame(); // No initial spawn here
+    spawnFood();
     #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop(mainLoop, 0, 1);
     #else
