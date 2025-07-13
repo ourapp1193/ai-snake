@@ -368,6 +368,7 @@ bool moveSnake(int& direction) {
                 if (isValidPosition(test_x, test_y) && !isBodyPosition(test_x, test_y, false)) {
                     safe_actions.push_back(i);
                 }
+                if (isBodyPosition(test_x, test_y, false)) urobos = true;
             }
             if (!safe_actions.empty()) {
                 direction = safe_actions[rand() % safe_actions.size()];
