@@ -317,7 +317,7 @@ void spawnFood() {
 
     auto all_positions = generateAllPositions();
     auto free_positions = getFreePositions(game.trail, all_positions);
-    if (!free_positions.empty() && !game.crashed) {
+    if (!free_positions.empty() && (!game.crashed && !urobos)) {
         int k = rand() % free_positions.size();
         game.food_x = free_positions[k][0];
         game.food_y = free_positions[k][1];
