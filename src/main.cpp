@@ -43,7 +43,7 @@ struct GameState {
 // Q-learning parameters
 struct QLearning {
     vector<vector<float>> table;
-    float learning_rate = 0.05f;  // Reduced from 0.1
+    float learning_rate = 0.05f;
     float discount_factor = 0.95f;
     float exploration_rate = 1.0f;
     int episodes = 0;
@@ -70,12 +70,13 @@ QLearning q_learning;
 Performance performance;
 SDLResources sdl;
 
-float MIN_EXPLORATION = q_learning.episodes < 100000 ? 0.01f : 0.005f;
-
+// Function to get dynamic minimum exploration
+float getMinExploration() {
+    return q_learning.episodes < 500000 ? 0.01f : 0.001f;
+}
 
 #ifdef __EMSCRIPTEN__
 EM_JS(void, initChartJS, (), {
-    // Chart initialization code remains the same
     function initializeCharts() {
         if (typeof Chart === 'undefined' || !Module.canvas) {
             setTimeout(initializeCharts, 100);
@@ -225,14 +226,12 @@ void initQTable() {
 int getStateIndex(int x, int y, int dir) {
     if (!isValidPosition(x, y)) return 0;
     
-    // Food direction
     int food_dir = 0;
     if (game.food_x > x) food_dir = 1;
     else if (game.food_x < x) food_dir = 2;
     if (game.food_y > y) food_dir |= 4;
     else if (game.food_y < y) food_dir |= 8;
     
-    // Danger detection
     int danger = 0;
     if (!isValidPosition(x-1, y) || isBodyPosition(x-1, y, false)) danger |= 1;
     if (!isValidPosition(x+1, y) || isBodyPosition(x+1, y, false)) danger |= 2;
@@ -267,19 +266,12 @@ void updateQTable(int old_state, int action, int new_state, float reward) {
 }
 
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed) {
-    if (crashed) return -50.0f;  // Reduced penalty
+    if (crashed) return -50.0f;
+    if (got_food) return 100.0f;
     
-    if (got_food) return 100.0f;  // Increased reward
-    
-    // Distance reward
     float prev_dist = abs(prev_x-game.food_x) + abs(prev_y-game.food_y);
     float new_dist = abs(x-game.food_x) + abs(y-game.food_y);
-    float dist_reward = (prev_dist - new_dist) * 2.0f;
-    
-    // Living reward
-    float time_reward = 0.1f;
-    
-    return dist_reward + time_reward;
+    return (prev_dist - new_dist) * 2.0f + 0.1f;
 }
 
 void resetGame() {
@@ -438,17 +430,14 @@ void drawGame() {
     SDL_SetRenderDrawColor(sdl.renderer, 0, 0, 0, 255);
     SDL_RenderClear(sdl.renderer);
 
-    // Draw border
     SDL_SetRenderDrawColor(sdl.renderer, 50, 50, 50, 255);
     SDL_Rect border = {0, 0, WIDTH * CELL_SIZE, HEIGHT * CELL_SIZE};
     SDL_RenderDrawRect(sdl.renderer, &border);
 
-    // Draw food
     SDL_SetRenderDrawColor(sdl.renderer, 255, 0, 0, 255);
     SDL_Rect food = {game.food_y * CELL_SIZE, game.food_x * CELL_SIZE, CELL_SIZE, CELL_SIZE};
     SDL_RenderFillRect(sdl.renderer, &food);
 
-    // Draw snake
     for (size_t i = 0; i < game.body.size(); i++) {
         const auto& seg = game.body[i];
         if (seg.size() == 2) {
@@ -511,7 +500,7 @@ void mainLoop() {
 
     if (q_learning.episodes < MAX_TRAINING_EPISODES) {
         q_learning.episodes++;
-        q_learning.exploration_rate = max(MIN_EXPLORATION, 
+        q_learning.exploration_rate = max(getMinExploration(), 
                                          q_learning.exploration_rate * q_learning.exploration_decay);
         logPerformance();
     }
@@ -570,7 +559,7 @@ int main() {
 
         if (q_learning.episodes < MAX_TRAINING_EPISODES) {
             q_learning.episodes++;
-            q_learning.exploration_rate = max(MIN_EXPLORATION, 
+            q_learning.exploration_rate = max(getMinExploration(), 
                                             q_learning.exploration_rate * q_learning.exploration_decay);
             logPerformance();
         }
