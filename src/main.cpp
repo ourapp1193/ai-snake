@@ -24,7 +24,7 @@ const int CELL_SIZE = 20;
 const int AI_UPDATE_INTERVAL = 5;
 const int LOG_INTERVAL = 100;
 const int MAX_TRAINING_EPISODES = 5000000;
-const float MIN_EXPLORATION = 0.0001f;
+const float MIN_EXPLORATION = 0.01f;
 
 // Game state
 struct GameState {
