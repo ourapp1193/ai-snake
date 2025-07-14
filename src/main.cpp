@@ -24,7 +24,6 @@ const int CELL_SIZE = 20;
 const int AI_UPDATE_INTERVAL = 5;
 const int LOG_INTERVAL = 100;
 const int MAX_TRAINING_EPISODES = 5000000;
-const float MIN_EXPLORATION = 0.01f;
 
 // Game state
 struct GameState {
@@ -70,6 +69,9 @@ GameState game;
 QLearning q_learning;
 Performance performance;
 SDLResources sdl;
+
+const float MIN_EXPLORATION = q_learning.episodes < 500000 ? 0.01f : 0.001f;
+
 
 #ifdef __EMSCRIPTEN__
 EM_JS(void, initChartJS, (), {
