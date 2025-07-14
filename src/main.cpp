@@ -70,7 +70,7 @@ QLearning q_learning;
 Performance performance;
 SDLResources sdl;
 
-float MIN_EXPLORATION = q_learning.episodes < 100000 ? 0.01f : 0.001f;
+float MIN_EXPLORATION = q_learning.episodes < 100000 ? 0.01f : 0.005f;
 
 
 #ifdef __EMSCRIPTEN__
