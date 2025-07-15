@@ -43,11 +43,11 @@ struct GameState {
 // Q-learning parameters
 struct QLearning {
     vector<vector<float>> table;
-    float learning_rate = 0.1f;  // Increased from 0.05
+    float learning_rate = 0.1f;
     float discount_factor = 0.95f;
     float exploration_rate = 1.0f;
     int episodes = 0;
-    const float exploration_decay = 0.9999f;  // Slower decay
+    const float exploration_decay = 0.9999f;
 };
 
 // Performance tracking
@@ -75,7 +75,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
 
 // Function to get dynamic minimum exploration
 float getMinExploration() {
-    return q_learning.episodes < 1000000 ? 0.001f : 0.0001f;  // Lower minimum exploration
+    return q_learning.episodes < 1000000 ? 0.001f : 0.0001f;
 }
 
 #ifdef __EMSCRIPTEN__
@@ -219,10 +219,20 @@ bool isBodyPosition(int x, int y, bool include_head = true) {
     return false;
 }
 
+bool hasNoEscape(int x, int y) {
+    int blocked_directions = 0;
+    if (!isValidPosition(x-1, y) || isBodyPosition(x-1, y, false)) blocked_directions++;
+    if (!isValidPosition(x+1, y) || isBodyPosition(x+1, y, false)) blocked_directions++;
+    if (!isValidPosition(x, y-1) || isBodyPosition(x, y-1, false)) blocked_directions++;
+    if (!isValidPosition(x, y+1) || isBodyPosition(x, y+1, false)) blocked_directions++;
+    
+    return blocked_directions >= 3;  // Only one or zero directions available
+}
+
 void initQTable() {
     q_learning.table.resize(WIDTH * HEIGHT * 128);
     for (auto& row : q_learning.table) {
-        row.assign(4, 0.0f);  // Initialize to 0 instead of 0.1
+        row.assign(4, 0.0f);
     }
 }
 
@@ -269,8 +279,8 @@ void updateQTable(int old_state, int action, int new_state, float reward) {
 }
 
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed) {
-    if (crashed) return -100.0f;  // Increased penalty for crashing
-    if (got_food) return 50.0f;   // Reduced reward for food
+    if (crashed) return -100.0f;
+    if (got_food) return 50.0f;
     
     float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
     float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
@@ -281,7 +291,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
         for (int dy = -1; dy <= 1; dy++) {
             if (dx == 0 && dy == 0) continue;
             if (isBodyPosition(x + dx, y + dy, false)) {
-                body_penalty -= 10.0f;  // Increased penalty for adjacent body segments
+                body_penalty -= 10.0f;
             }
         }
     }
@@ -297,7 +307,13 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
         }
     }
     
-    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty;  // Increased distance factor
+    // Add penalty for no escape situations
+    float escape_penalty = 0.0f;
+    if (hasNoEscape(x, y)) {
+        escape_penalty -= 30.0f;  // Large penalty for getting into no-escape situations
+    }
+    
+    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + escape_penalty;
 }
 
 void resetGame() {
