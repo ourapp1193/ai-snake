@@ -43,11 +43,11 @@ struct GameState {
 // Q-learning parameters
 struct QLearning {
     vector<vector<float>> table;
-    float learning_rate = 0.05f;
+    float learning_rate = 0.1f;  // Increased from 0.05
     float discount_factor = 0.95f;
     float exploration_rate = 1.0f;
     int episodes = 0;
-    const float exploration_decay = 0.9995f;
+    const float exploration_decay = 0.9999f;  // Slower decay
 };
 
 // Performance tracking
@@ -75,7 +75,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
 
 // Function to get dynamic minimum exploration
 float getMinExploration() {
-    return q_learning.episodes < 500000 ? 0.01f : 0.001f;
+    return q_learning.episodes < 1000000 ? 0.001f : 0.0001f;  // Lower minimum exploration
 }
 
 #ifdef __EMSCRIPTEN__
@@ -222,7 +222,7 @@ bool isBodyPosition(int x, int y, bool include_head = true) {
 void initQTable() {
     q_learning.table.resize(WIDTH * HEIGHT * 128);
     for (auto& row : q_learning.table) {
-        row.assign(4, 0.1f);
+        row.assign(4, 0.0f);  // Initialize to 0 instead of 0.1
     }
 }
 
@@ -269,8 +269,8 @@ void updateQTable(int old_state, int action, int new_state, float reward) {
 }
 
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed) {
-    if (crashed) return -50.0f;
-    if (got_food) return 100.0f;
+    if (crashed) return -100.0f;  // Increased penalty for crashing
+    if (got_food) return 50.0f;   // Reduced reward for food
     
     float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
     float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
@@ -281,12 +281,23 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
         for (int dy = -1; dy <= 1; dy++) {
             if (dx == 0 && dy == 0) continue;
             if (isBodyPosition(x + dx, y + dy, false)) {
-                body_penalty -= 5.0f; // Penalty for each adjacent body segment
+                body_penalty -= 10.0f;  // Increased penalty for adjacent body segments
             }
         }
     }
     
-    return (prev_dist - new_dist) * 2.0f + 0.1f + body_penalty;
+    // Add penalty for moving in circles
+    float circle_penalty = 0.0f;
+    if (game.trail.size() > 10) {
+        for (size_t i = 0; i < game.trail.size() - 1; i++) {
+            if (game.trail[i][0] == x && game.trail[i][1] == y) {
+                circle_penalty -= 5.0f * (game.trail.size() - i);
+                break;
+            }
+        }
+    }
+    
+    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty;  // Increased distance factor
 }
 
 void resetGame() {
