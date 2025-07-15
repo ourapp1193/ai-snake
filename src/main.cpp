@@ -71,7 +71,6 @@ Performance performance;
 SDLResources sdl;
 
 // Forward declarations
-bool isBodyPosition(int x, int y, bool include_head = true);
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed);
 
 // Function to get dynamic minimum exploration
