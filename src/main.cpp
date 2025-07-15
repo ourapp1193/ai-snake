@@ -24,6 +24,7 @@ const int CELL_SIZE = 20;
 const int AI_UPDATE_INTERVAL = 5;
 const int LOG_INTERVAL = 100;
 const int MAX_TRAINING_EPISODES = 5000000;
+const int STATE_SPACE_SIZE = WIDTH * HEIGHT * 8 * 16;
 
 // Game state
 struct GameState {
@@ -43,11 +44,13 @@ struct GameState {
 // Q-learning parameters
 struct QLearning {
     vector<vector<float>> table;
-    float learning_rate = 0.1f;
-    float discount_factor = 0.95f;
+    float learning_rate = 0.15f;
+    float discount_factor = 0.97f;
     float exploration_rate = 1.0f;
     int episodes = 0;
-    const float exploration_decay = 0.9999f;
+    const float exploration_decay = 0.99995f;
+    const float min_exploration = 0.001f;
+    float reward_clipping = 100.0f;
 };
 
 // Performance tracking
@@ -72,10 +75,10 @@ SDLResources sdl;
 
 // Forward declarations
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed);
+void updateQTable(int old_state, int action, float reward, int new_state);
 
-// Function to get dynamic minimum exploration
 float getMinExploration() {
-    return q_learning.episodes < 1000000 ? 0.001f : 0.0001f;
+    return q_learning.min_exploration;
 }
 
 #ifdef __EMSCRIPTEN__
@@ -225,14 +228,16 @@ bool hasNoEscape(int x, int y) {
     if (!isValidPosition(x+1, y) || isBodyPosition(x+1, y, false)) blocked_directions++;
     if (!isValidPosition(x, y-1) || isBodyPosition(x, y-1, false)) blocked_directions++;
     if (!isValidPosition(x, y+1) || isBodyPosition(x, y+1, false)) blocked_directions++;
-    
     return blocked_directions >= 3;
 }
 
 void initQTable() {
-    q_learning.table.resize(WIDTH * HEIGHT * 128);
+    q_learning.table.resize(STATE_SPACE_SIZE);
     for (auto& row : q_learning.table) {
         row.assign(4, 0.0f);
+        for (float& val : row) {
+            val = (rand() % 100) / 1000.0f;
+        }
     }
 }
 
@@ -251,7 +256,12 @@ int getStateIndex(int x, int y, int dir) {
     if (!isValidPosition(x, y-1) || isBodyPosition(x, y-1, false)) danger |= 4;
     if (!isValidPosition(x, y+1) || isBodyPosition(x, y+1, false)) danger |= 8;
     
-    return (y * WIDTH + x) * 128 + dir * 32 + food_dir * 4 + danger;
+    int features = 0;
+    if (x == 0 || x == HEIGHT-1 || y == 0 || y == WIDTH-1) features |= 1;
+    if ((x == 0 || x == HEIGHT-1) && (y == 0 || y == WIDTH-1)) features |= 2;
+    if (game.length > 10) features |= 4;
+    
+    return ((y * WIDTH + x) * 8 + dir) * 16 + food_dir * 4 + danger + features;
 }
 
 int chooseAction(int x, int y, int current_dir) {
@@ -261,45 +271,86 @@ int chooseAction(int x, int y, int current_dir) {
 
     int state = getStateIndex(x, y, current_dir);
     if (state >= 0 && state < q_learning.table.size()) {
-        return distance(q_learning.table[state].begin(),
-                      max_element(q_learning.table[state].begin(), q_learning.table[state].end()));
+        vector<float> q_values = q_learning.table[state];
+        float temperature = max(0.1f, q_learning.exploration_rate);
+        vector<float> exp_values(4);
+        float sum = 0.0f;
+        
+        for (int i = 0; i < 4; i++) {
+            exp_values[i] = exp(q_values[i] / temperature);
+            sum += exp_values[i];
+        }
+        
+        float r = static_cast<float>(rand()) / RAND_MAX;
+        float cumulative = 0.0f;
+        for (int i = 0; i < 4; i++) {
+            cumulative += exp_values[i] / sum;
+            if (r <= cumulative) {
+                return i;
+            }
+        }
     }
     return rand() % 4;
 }
 
-void updateQTable(int old_state, int action, int new_state, float reward) {
-    if (old_state >= 0 && old_state < q_learning.table.size() && 
-        new_state >= 0 && new_state < q_learning.table.size()) {
-        float best_future = *max_element(q_learning.table[new_state].begin(), 
-                                       q_learning.table[new_state].end());
-        q_learning.table[old_state][action] = 
-            (1 - q_learning.learning_rate) * q_learning.table[old_state][action] +
-            q_learning.learning_rate * (reward + q_learning.discount_factor * best_future);
+void updateQTable(int old_state, int action, float reward, int new_state) {
+    if (old_state < 0 || old_state >= q_learning.table.size() || 
+        new_state < 0 || new_state >= q_learning.table.size()) {
+        return;
     }
+
+    reward = max(-q_learning.reward_clipping, min(q_learning.reward_clipping, reward));
+    
+    float old_q = q_learning.table[old_state][action];
+    float max_future_q = *max_element(q_learning.table[new_state].begin(), q_learning.table[new_state].end());
+    
+    float adaptive_lr = q_learning.learning_rate * (1.0f - (abs(old_q) / (1.0f + abs(old_q))));
+    
+    float new_q = old_q + adaptive_lr * (reward + q_learning.discount_factor * max_future_q - old_q);
+    q_learning.table[old_state][action] = new_q;
 }
 
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed) {
     if (crashed) return -100.0f;
-    if (got_food) return 50.0f;
+    
+    if (got_food) {
+        return 30.0f + game.length * 1.5f;
+    }
     
     float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
     float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
+    
+    float distance_reward = 0.0f;
+    if (new_dist < prev_dist) {
+        distance_reward = 2.0f * (1.0f / (new_dist + 1.0f));
+    } else if (new_dist > prev_dist) {
+        distance_reward = -1.5f * (new_dist - prev_dist);
+    }
     
     float body_penalty = 0.0f;
     for (int dx = -1; dx <= 1; dx++) {
         for (int dy = -1; dy <= 1; dy++) {
             if (dx == 0 && dy == 0) continue;
             if (isBodyPosition(x + dx, y + dy, false)) {
-                body_penalty -= 10.0f;
+                float dist = abs(dx) + abs(dy);
+                body_penalty -= 12.0f / dist;
             }
         }
     }
     
-    float circle_penalty = 0.0f;
+    float wall_penalty = 0.0f;
+    if (x == 0 || x == HEIGHT-1 || y == 0 || y == WIDTH-1) {
+        wall_penalty -= 5.0f;
+        if ((x == 0 || x == HEIGHT-1) && (y == 0 || y == WIDTH-1)) {
+            wall_penalty -= 10.0f;
+        }
+    }
+    
+    float pattern_penalty = 0.0f;
     if (game.trail.size() > 10) {
-        for (size_t i = 0; i < game.trail.size() - 1; i++) {
+        for (size_t i = 0; i < min(game.trail.size(), static_cast<size_t>(20)); i++) {
             if (game.trail[i][0] == x && game.trail[i][1] == y) {
-                circle_penalty -= 5.0f * (game.trail.size() - i);
+                pattern_penalty -= 8.0f * (1.0f - i/20.0f);
                 break;
             }
         }
@@ -307,10 +358,13 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     
     float escape_penalty = 0.0f;
     if (hasNoEscape(x, y)) {
-        escape_penalty -= 30.0f;
+        escape_penalty -= 40.0f;
     }
     
-    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + escape_penalty;
+    float time_penalty = -0.05f;
+    
+    return distance_reward + body_penalty + wall_penalty + 
+           pattern_penalty + escape_penalty + time_penalty;
 }
 
 void resetGame() {
@@ -368,7 +422,7 @@ bool moveSnake(int& direction) {
         float reward = calculateReward(prev_x, prev_y, new_x, new_y, got_food, crashed);
         int old_state = getStateIndex(prev_x, prev_y, prev_dir);
         int new_state = getStateIndex(new_x, new_y, action);
-        updateQTable(old_state, action, new_state, reward);
+        updateQTable(old_state, action, reward, new_state);
 
         if (valid) {
             direction = action;
@@ -425,7 +479,7 @@ bool moveSnake(int& direction) {
         spawnFood();
     }
 
-    if (game.steps_since_last_food > 200) {
+    if (game.steps_since_last_food > 200 + game.length * 5) {
         return true;
     }
 
@@ -466,12 +520,11 @@ void initSDL() {
 }
 
 void drawGame() {
-    // Clear screen
     SDL_SetRenderDrawColor(sdl.renderer, 0, 0, 0, 255);
     SDL_RenderClear(sdl.renderer);
 
     // Draw grid
-    SDL_SetRenderDrawColor(sdl.renderer, 50, 50, 50, 255);
+    SDL_SetRenderDrawColor(sdl.renderer, 30, 30, 30, 255);
     for (int x = 0; x <= WIDTH; x++) {
         SDL_RenderDrawLine(sdl.renderer, x * CELL_SIZE, 0, x * CELL_SIZE, HEIGHT * CELL_SIZE);
     }
@@ -480,20 +533,18 @@ void drawGame() {
     }
 
     // Draw food
-    SDL_SetRenderDrawColor(sdl.renderer, 255, 0, 0, 255);
+    SDL_SetRenderDrawColor(sdl.renderer, 255, 50, 50, 255);
     SDL_Rect food = {game.food_y * CELL_SIZE, game.food_x * CELL_SIZE, CELL_SIZE, CELL_SIZE};
     SDL_RenderFillRect(sdl.renderer, &food);
 
-    // Draw snake body
+    // Draw snake
     for (size_t i = 0; i < game.body.size(); i++) {
         const auto& seg = game.body[i];
         if (seg.size() == 2) {
             if (i == 0) {
-                // Head
                 SDL_SetRenderDrawColor(sdl.renderer, 0, 255, 0, 255);
             } else {
-                // Body segments
-                int intensity = 100 + (155 * i / game.body.size());
+                int intensity = 100 + (155 * (game.body.size() - i) / game.body.size());
                 SDL_SetRenderDrawColor(sdl.renderer, 0, intensity, 0, 255);
             }
             SDL_Rect body = {seg[1] * CELL_SIZE, seg[0] * CELL_SIZE, CELL_SIZE, CELL_SIZE};
