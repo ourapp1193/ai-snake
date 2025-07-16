@@ -3,11 +3,111 @@
 #include <cstdlib>
 #include <ctime>
 #include <algorithm>
-#include <queue>
 #include <cmath>
 #include <SDL/SDL.h>
 
-using namespace std;
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/html5.h>
+
+EM_JS(void, initChartJS, (), {
+    if (typeof Chart === 'undefined') {
+        console.log('Chart.js not loaded yet');
+        setTimeout(() => initChartJS(), 100);
+        return;
+    }
+    
+    const container = document.createElement('div');
+    container.id = 'chart-container';
+    container.style.cssText = `
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        background: rgba(0,0,0,0.7);
+        padding: 10px;
+        color: white;
+        font-family: Arial;
+    `;
+    document.body.appendChild(container);
+    
+    const canvas1 = document.createElement('canvas');
+    canvas1.id = 'scoreChart';
+    canvas1.width = 400;
+    canvas1.height = 200;
+    container.appendChild(canvas1);
+    
+    const canvas2 = document.createElement('canvas');
+    canvas2.id = 'distanceChart';
+    canvas2.width = 400;
+    canvas2.height = 200;
+    container.appendChild(canvas2);
+    
+    window.scoreChart = new Chart(canvas1, {
+        type: 'line',
+        data: { labels: [], datasets: [{
+            label: 'Score',
+            data: [],
+            borderColor: 'rgba(75, 192, 192, 1)',
+            borderWidth: 1,
+            fill: false
+        }]},
+        options: { responsive: false }
+    });
+    
+    window.distanceChart = new Chart(canvas2, {
+        type: 'line',
+        data: { labels: [], datasets: [
+            {
+                label: 'Avg Distance',
+                data: [],
+                borderColor: 'rgba(255, 99, 132, 1)',
+                borderWidth: 1,
+                fill: false
+            },
+            {
+                label: 'Min Distance',
+                data: [],
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1,
+                fill: false
+            }
+        ]},
+        options: { responsive: false }
+    });
+});
+
+EM_JS(void, updateCharts, (int episode, int score, float avg_dist, float min_dist), {
+    if (!window.scoreChart || !window.distanceChart) return;
+    
+    const labels = window.scoreChart.data.labels;
+    labels.push(episode);
+    if (labels.length > 100) labels.shift();
+    
+    window.scoreChart.data.datasets[0].data.push(score);
+    if (window.scoreChart.data.datasets[0].data.length > 100) {
+        window.scoreChart.data.datasets[0].data.shift();
+    }
+    
+    window.distanceChart.data.labels = labels;
+    window.distanceChart.data.datasets[0].data.push(avg_dist);
+    window.distanceChart.data.datasets[1].data.push(min_dist);
+    
+    if (window.distanceChart.data.datasets[0].data.length > 100) {
+        window.distanceChart.data.datasets[0].data.shift();
+        window.distanceChart.data.datasets[1].data.shift();
+    }
+    
+    window.scoreChart.update();
+    window.distanceChart.update();
+    
+    const status = document.getElementById('status') || document.createElement('div');
+    status.id = 'status';
+    status.textContent = `Episode: ${episode} | Score: ${score} | Avg Dist: ${avg_dist.toFixed(2)} | Min Dist: ${min_dist.toFixed(2)}`;
+    if (!document.getElementById('status')) {
+        document.body.appendChild(status);
+    }
+});
+#endif
 
 // Game constants
 const int WIDTH = 20;
@@ -135,23 +235,19 @@ void calculateDistanceMetrics() {
 }
 
 float calculateDistanceReward() {
-    // Strong penalty for collisions (handled separately)
     if (game.min_head_body_distance < 1.0f) {
         return -50.0f;
     }
     
-    // Small penalty for getting too close
     if (game.min_head_body_distance < OPTIMAL_MIN_DISTANCE) {
         return -10.0f * (OPTIMAL_MIN_DISTANCE - game.min_head_body_distance);
     }
     
-    // Reward for maintaining optimal distance
     if (game.min_head_body_distance >= OPTIMAL_MIN_DISTANCE && 
         game.min_head_body_distance <= OPTIMAL_MAX_DISTANCE) {
         return 5.0f;
     }
     
-    // Small reward for being safely away
     if (game.min_head_body_distance > OPTIMAL_MAX_DISTANCE) {
         return 2.0f;
     }
@@ -160,29 +256,22 @@ float calculateDistanceReward() {
 }
 
 void initQTable() {
-    // State representation:
-    // - Position (x,y)
-    // - Direction (4 possible)
-    // - Food direction (8 possible)
-    // - Danger (8 possible)
     int state_space_size = WIDTH * HEIGHT * 4 * 8 * 8;
     q_learning.table.resize(state_space_size);
     
     for (auto& row : q_learning.table) {
-        row.assign(4, 0.0f);  // 4 possible actions
+        row.assign(4, 0.0f);
     }
 }
 
 int getStateIndex(int x, int y, int dir) {
     if (!isValidPosition(x, y)) return 0;
     
-    // Food direction (3 bits)
     int food_dir = 0;
     if (game.food_x > x) food_dir |= 1;
     else if (game.food_x < x) food_dir |= 2;
     if (game.food_y > y) food_dir |= 4;
     
-    // Danger detection (3 bits)
     int danger = 0;
     if (!isValidPosition(x-1, y) || isBodyPosition(x-1, y, false)) danger |= 1;
     if (!isValidPosition(x+1, y) || isBodyPosition(x+1, y, false)) danger |= 2;
@@ -192,12 +281,10 @@ int getStateIndex(int x, int y, int dir) {
 }
 
 int chooseAction(int x, int y, int current_dir) {
-    // Exploration: random action
     if (static_cast<float>(rand()) / RAND_MAX < q_learning.exploration_rate) {
         return rand() % 4;
     }
 
-    // Exploitation: best known action
     int state = getStateIndex(x, y, current_dir);
     if (state >= 0 && state < static_cast<int>(q_learning.table.size())) {
         return distance(q_learning.table[state].begin(),
@@ -223,15 +310,11 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     if (crashed) return -100.0f;
     if (got_food) return 50.0f;
     
-    // Distance to food reward
     float prev_food_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
     float new_food_dist = abs(x - game.food_x) + abs(y - game.food_y);
     float food_reward = (prev_food_dist - new_food_dist) * 2.0f;
     
-    // Head-body distance reward
     float distance_reward = calculateDistanceReward();
-    
-    // Movement penalty to encourage efficiency
     float movement_penalty = -0.1f;
     
     return food_reward + distance_reward + movement_penalty;
@@ -279,10 +362,10 @@ bool moveSnake(int& direction) {
         
         int new_x = game.head_x, new_y = game.head_y;
         switch (action) {
-            case 0: new_x--; break; // Up
-            case 1: new_x++; break; // Down
-            case 2: new_y--; break; // Left
-            case 3: new_y++; break; // Right
+            case 0: new_x--; break;
+            case 1: new_x++; break;
+            case 2: new_y--; break;
+            case 3: new_y++; break;
         }
 
         bool valid = isValidPosition(new_x, new_y) && !isBodyPosition(new_x, new_y, false);
@@ -313,12 +396,11 @@ bool moveSnake(int& direction) {
             if (!safe_actions.empty()) {
                 direction = safe_actions[rand() % safe_actions.size()];
             } else {
-                return true; // No safe moves, game over
+                return true;
             }
         }
     }
 
-    // Execute movement
     switch (direction) {
         case 0: game.head_x--; break;
         case 1: game.head_x++; break;
@@ -328,18 +410,15 @@ bool moveSnake(int& direction) {
 
     game.steps_since_last_food++;
 
-    // Check for collisions
     if (!isValidPosition(game.head_x, game.head_y) || isBodyPosition(game.head_x, game.head_y, false)) {
         return true;
     }
 
-    // Update body
     game.body.insert(game.body.begin(), {game.head_x, game.head_y});
     if (game.body.size() > game.length) {
         game.body.pop_back();
     }
 
-    // Check for food
     if (game.head_x == game.food_x && game.head_y == game.food_y) {
         game.score++;
         game.lifetime_score++;
@@ -348,10 +427,8 @@ bool moveSnake(int& direction) {
         spawnFood();
     }
 
-    // Update distance metrics
     calculateDistanceMetrics();
 
-    // Check for starvation
     if (game.steps_since_last_food > 200) {
         return true;
     }
@@ -387,10 +464,8 @@ void initSDL() {
 }
 
 void drawGame() {
-    // Clear screen
     SDL_FillRect(sdl.screen, NULL, SDL_MapRGB(sdl.screen->format, 0, 0, 0));
 
-    // Draw grid
     SDL_Rect grid_rect;
     for (int i = 0; i < HEIGHT; ++i) {
         for (int j = 0; j < WIDTH; ++j) {
@@ -400,29 +475,24 @@ void drawGame() {
         }
     }
 
-    // Draw food
     SDL_Rect food_rect = {game.food_y * CELL_SIZE, game.food_x * CELL_SIZE, 
                          CELL_SIZE, CELL_SIZE};
     SDL_FillRect(sdl.screen, &food_rect, 
                 SDL_MapRGB(sdl.screen->format, 255, 0, 0));
 
-    // Draw snake body with distance-based coloring
     for (size_t i = 0; i < game.body.size(); ++i) {
         const auto& seg = game.body[i];
         SDL_Rect body_rect = {seg[1] * CELL_SIZE, seg[0] * CELL_SIZE, 
                              CELL_SIZE, CELL_SIZE};
         
         if (i == 0) {
-            // Head - green
             SDL_FillRect(sdl.screen, &body_rect, 
                         SDL_MapRGB(sdl.screen->format, 0, 255, 0));
         } else {
-            // Body - color based on distance from head
             float dx = seg[0] - game.head_x;
             float dy = seg[1] - game.head_y;
             float dist = sqrt(dx*dx + dy*dy);
             
-            // Color gradient from yellow (close) to dark green (far)
             int r = min(255, static_cast<int>(255 * (1 - dist/10.0f)));
             int g = 255;
             int b = 0;
@@ -432,24 +502,6 @@ void drawGame() {
         }
     }
 
-    // Draw distance information
-    char dist_text[100];
-    snprintf(dist_text, sizeof(dist_text), 
-            "Avg: %.1f  Min: %.1f  Max: %.1f", 
-            game.avg_head_body_distance,
-            game.min_head_body_distance,
-            game.max_head_body_distance);
-    
-    SDL_Color text_color = {255, 255, 255};
-    SDL_Surface* text_surface = SDL_CreateRGBSurface(0, 300, 20, 32, 0, 0, 0, 0);
-    SDL_FillRect(text_surface, NULL, SDL_MapRGB(text_surface->format, 0, 0, 0));
-    
-    // This is a simplified text rendering - in a real application you'd use SDL_ttf
-    SDL_Rect text_rect = {10, 10, 300, 20};
-    SDL_BlitSurface(text_surface, NULL, sdl.screen, &text_rect);
-    SDL_FreeSurface(text_surface);
-
-    // Update window
     SDL_UpdateWindowSurface(sdl.window);
 }
 
@@ -462,8 +514,32 @@ void logPerformance() {
              << game.max_head_body_distance << " (avg " 
              << game.avg_head_body_distance << ")"
              << " | Explore: " << q_learning.exploration_rate << endl;
+             
+        #ifdef __EMSCRIPTEN__
+        updateCharts(q_learning.episodes, game.score, 
+                    game.avg_head_body_distance, game.min_head_body_distance);
+        #endif
     }
 }
+
+#ifdef __EMSCRIPTEN__
+extern "C" {
+    EMSCRIPTEN_KEEPALIVE
+    float getExplorationRate() {
+        return q_learning.exploration_rate;
+    }
+    
+    EMSCRIPTEN_KEEPALIVE
+    float getAverageDistance() {
+        return game.avg_head_body_distance;
+    }
+    
+    EMSCRIPTEN_KEEPALIVE
+    int getScore() {
+        return game.score;
+    }
+}
+#endif
 
 void mainLoop() {
     static int direction = rand() % 4;
@@ -488,7 +564,7 @@ void mainLoop() {
     }
 
     if (crashed) {
-        reset_timer = 10; // Brief pause before reset
+        reset_timer = 10;
     }
 }
 
@@ -500,7 +576,10 @@ void cleanup() {
 int main() {
     srand(static_cast<unsigned>(time(nullptr)));
 
-    // Initialize game state
+    #ifdef __EMSCRIPTEN__
+    initChartJS();
+    #endif
+
     game.body = {{HEIGHT/2, WIDTH/2}};
     auto free_positions = getFreePositions(game.body);
     if (!free_positions.empty()) {
@@ -508,13 +587,12 @@ int main() {
         game.food_y = free_positions[0][1];
     }
 
-    // Initialize Q-learning
     initQTable();
-    
-    // Initialize SDL
     initSDL();
 
-    // Main game loop
+    #ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop(mainLoop, 0, 1);
+    #else
     bool running = true;
     while (running) {
         mainLoop();
@@ -528,6 +606,7 @@ int main() {
         
         SDL_Delay(game.speed);
     }
+    #endif
 
     cleanup();
     return 0;
