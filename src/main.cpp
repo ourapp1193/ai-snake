@@ -127,7 +127,7 @@ struct GameState {
     int food_x = 0, food_y = 0;
     bool crashed = false;
     int speed = 10;
-    vector<vector<int>> body;
+    std::vector<std::vector<int>> body;
     int lifetime_score = 0;
     int steps_since_last_food = 0;
     float avg_head_body_distance = 0;
@@ -137,7 +137,7 @@ struct GameState {
 
 // Q-learning parameters
 struct QLearning {
-    vector<vector<float>> table;
+    std::vector<std::vector<float>> table;
     float learning_rate = 0.1f;
     float discount_factor = 0.95f;
     float exploration_rate = 1.0f;
@@ -159,8 +159,8 @@ QLearning q_learning;
 SDLResources sdl;
 
 // Helper functions
-vector<vector<int>> generateAllPositions() {
-    vector<vector<int>> positions;
+std::vector<std::vector<int>> generateAllPositions() {
+    std::vector<std::vector<int>> positions;
     positions.reserve(WIDTH * HEIGHT);
     for (int i = 0; i < HEIGHT; ++i) {
         for (int j = 0; j < WIDTH; ++j) {
@@ -170,9 +170,9 @@ vector<vector<int>> generateAllPositions() {
     return positions;
 }
 
-vector<vector<int>> getFreePositions(const vector<vector<int>>& occupied) {
+std::vector<std::vector<int>> getFreePositions(const std::vector<std::vector<int>>& occupied) {
     auto all = generateAllPositions();
-    vector<vector<int>> free;
+    std::vector<std::vector<int>> free;
     free.reserve(all.size());
     
     for (const auto& pos : all) {
@@ -224,8 +224,8 @@ void calculateDistanceMetrics() {
         float dist = sqrt(dx*dx + dy*dy);
         
         total_distance += dist;
-        current_min = min(current_min, dist);
-        current_max = max(current_max, dist);
+        current_min = std::min(current_min, dist);
+        current_max = std::max(current_max, dist);
         count++;
     }
     
@@ -287,8 +287,8 @@ int chooseAction(int x, int y, int current_dir) {
 
     int state = getStateIndex(x, y, current_dir);
     if (state >= 0 && state < static_cast<int>(q_learning.table.size())) {
-        return distance(q_learning.table[state].begin(),
-                       max_element(q_learning.table[state].begin(), 
+        return std::distance(q_learning.table[state].begin(),
+                       std::max_element(q_learning.table[state].begin(), 
                                    q_learning.table[state].end()));
     }
     
@@ -298,7 +298,7 @@ int chooseAction(int x, int y, int current_dir) {
 void updateQTable(int old_state, int action, int new_state, float reward) {
     if (old_state >= 0 && old_state < static_cast<int>(q_learning.table.size()) && 
         new_state >= 0 && new_state < static_cast<int>(q_learning.table.size())) {
-        float best_future = *max_element(q_learning.table[new_state].begin(), 
+        float best_future = *std::max_element(q_learning.table[new_state].begin(), 
                                         q_learning.table[new_state].end());
         q_learning.table[old_state][action] = 
             (1 - q_learning.learning_rate) * q_learning.table[old_state][action] +
@@ -380,7 +380,7 @@ bool moveSnake(int& direction) {
         if (valid) {
             direction = action;
         } else {
-            vector<int> safe_actions;
+            std::vector<int> safe_actions;
             for (int i = 0; i < 4; i++) {
                 int test_x = game.head_x, test_y = game.head_y;
                 switch (i) {
@@ -438,7 +438,7 @@ bool moveSnake(int& direction) {
 
 void initSDL() {
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        cerr << "SDL_Init Error: " << SDL_GetError() << endl;
+        std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
         exit(1);
     }
 
@@ -449,14 +449,14 @@ void initSDL() {
                                 HEIGHT * CELL_SIZE,
                                 SDL_WINDOW_SHOWN);
     if (!sdl.window) {
-        cerr << "SDL_CreateWindow Error: " << SDL_GetError() << endl;
+        std::cerr << "SDL_CreateWindow Error: " << SDL_GetError() << std::endl;
         SDL_Quit();
         exit(1);
     }
 
     sdl.screen = SDL_GetWindowSurface(sdl.window);
     if (!sdl.screen) {
-        cerr << "SDL_GetWindowSurface Error: " << SDL_GetError() << endl;
+        std::cerr << "SDL_GetWindowSurface Error: " << SDL_GetError() << std::endl;
         SDL_DestroyWindow(sdl.window);
         SDL_Quit();
         exit(1);
@@ -493,7 +493,7 @@ void drawGame() {
             float dy = seg[1] - game.head_y;
             float dist = sqrt(dx*dx + dy*dy);
             
-            int r = min(255, static_cast<int>(255 * (1 - dist/10.0f)));
+            int r = std::min(255, static_cast<int>(255 * (1 - dist/10.0f)));
             int g = 255;
             int b = 0;
             
@@ -507,13 +507,13 @@ void drawGame() {
 
 void logPerformance() {
     if (q_learning.episodes % 100 == 0) {
-        cout << "Episode: " << q_learning.episodes 
+        std::cout << "Episode: " << q_learning.episodes 
              << " | Score: " << game.score 
              << " | Length: " << game.length
              << " | Dist: " << game.min_head_body_distance << "-" 
              << game.max_head_body_distance << " (avg " 
              << game.avg_head_body_distance << ")"
-             << " | Explore: " << q_learning.exploration_rate << endl;
+             << " | Explore: " << q_learning.exploration_rate << std::endl;
              
         #ifdef __EMSCRIPTEN__
         updateCharts(q_learning.episodes, game.score, 
@@ -558,7 +558,7 @@ void mainLoop() {
 
     if (q_learning.episodes < MAX_TRAINING_EPISODES) {
         q_learning.episodes++;
-        q_learning.exploration_rate = max(q_learning.min_exploration, 
+        q_learning.exploration_rate = std::max(q_learning.min_exploration, 
                                         q_learning.exploration_rate * q_learning.exploration_decay);
         logPerformance();
     }
@@ -574,7 +574,7 @@ void cleanup() {
 }
 
 int main() {
-    srand(static_cast<unsigned>(time(nullptr)));
+    std::srand(static_cast<unsigned>(std::time(nullptr)));
 
     #ifdef __EMSCRIPTEN__
     initChartJS();
