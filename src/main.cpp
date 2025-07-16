@@ -3,189 +3,205 @@
 #include <cstdlib>
 #include <ctime>
 #include <algorithm>
+#include <queue>
 #include <cmath>
 #include <SDL/SDL.h>
-
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/html5.h>
 
-EM_JS(void, initChartJS, (), {
-    if (typeof Chart === 'undefined') {
-        console.log('Chart.js not loaded yet');
-        setTimeout(() => initChartJS(), 100);
-        return;
-    }
-    
-    const container = document.createElement('div');
-    container.id = 'chart-container';
-    container.style.cssText = `
-        position: absolute;
-        top: 20px;
-        left: 20px;
-        background: rgba(0,0,0,0.7);
-        padding: 10px;
-        color: white;
-        font-family: Arial;
-    `;
-    document.body.appendChild(container);
-    
-    const canvas1 = document.createElement('canvas');
-    canvas1.id = 'scoreChart';
-    canvas1.width = 400;
-    canvas1.height = 200;
-    container.appendChild(canvas1);
-    
-    const canvas2 = document.createElement('canvas');
-    canvas2.id = 'distanceChart';
-    canvas2.width = 400;
-    canvas2.height = 200;
-    container.appendChild(canvas2);
-    
-    window.scoreChart = new Chart(canvas1, {
-        type: 'line',
-        data: { labels: [], datasets: [{
-            label: 'Score',
-            data: [],
-            borderColor: 'rgba(75, 192, 192, 1)',
-            borderWidth: 1,
-            fill: false
-        }]},
-        options: { responsive: false }
-    });
-    
-    window.distanceChart = new Chart(canvas2, {
-        type: 'line',
-        data: { labels: [], datasets: [
-            {
-                label: 'Avg Distance',
-                data: [],
-                borderColor: 'rgba(255, 99, 132, 1)',
-                borderWidth: 1,
-                fill: false
-            },
-            {
-                label: 'Min Distance',
-                data: [],
-                borderColor: 'rgba(54, 162, 235, 1)',
-                borderWidth: 1,
-                fill: false
-            }
-        ]},
-        options: { responsive: false }
-    });
-});
-
-EM_JS(void, updateCharts, (int episode, int score, float avg_dist, float min_dist), {
-    if (!window.scoreChart || !window.distanceChart) return;
-    
-    const labels = window.scoreChart.data.labels;
-    labels.push(episode);
-    if (labels.length > 100) labels.shift();
-    
-    window.scoreChart.data.datasets[0].data.push(score);
-    if (window.scoreChart.data.datasets[0].data.length > 100) {
-        window.scoreChart.data.datasets[0].data.shift();
-    }
-    
-    window.distanceChart.data.labels = labels;
-    window.distanceChart.data.datasets[0].data.push(avg_dist);
-    window.distanceChart.data.datasets[1].data.push(min_dist);
-    
-    if (window.distanceChart.data.datasets[0].data.length > 100) {
-        window.distanceChart.data.datasets[0].data.shift();
-        window.distanceChart.data.datasets[1].data.shift();
-    }
-    
-    window.scoreChart.update();
-    window.distanceChart.update();
-    
-    const status = document.getElementById('status') || document.createElement('div');
-    status.id = 'status';
-    status.textContent = `Episode: ${episode} | Score: ${score} | Avg Dist: ${avg_dist.toFixed(2)} | Min Dist: ${min_dist.toFixed(2)}`;
-    if (!document.getElementById('status')) {
-        document.body.appendChild(status);
-    }
+EM_JS(void, export_functions, (), {
+    Module['getExplorationRate'] = Module.cwrap('getExplorationRate', 'number', []);
 });
 #endif
+
+using namespace std;
 
 // Game constants
 const int WIDTH = 20;
 const int HEIGHT = 20;
 const int CELL_SIZE = 20;
 const int AI_UPDATE_INTERVAL = 5;
+const int LOG_INTERVAL = 100;
 const int MAX_TRAINING_EPISODES = 5000000;
-const float OPTIMAL_MIN_DISTANCE = 3.0f;
-const float OPTIMAL_MAX_DISTANCE = 5.0f;
 
 // Game state
 struct GameState {
     int head_x = HEIGHT / 2;
     int head_y = WIDTH / 2;
     int score = 0;
-    int length = 3;
+    int length = 2;
     int food_x = 0, food_y = 0;
     bool crashed = false;
     int speed = 10;
-    std::vector<std::vector<int>> body;
+    vector<vector<int>> body;
+    vector<vector<int>> trail;
     int lifetime_score = 0;
     int steps_since_last_food = 0;
-    float avg_head_body_distance = 0;
-    float min_head_body_distance = 999;
-    float max_head_body_distance = 0;
 };
 
 // Q-learning parameters
 struct QLearning {
-    std::vector<std::vector<float>> table;
+    vector<vector<float>> table;
     float learning_rate = 0.1f;
     float discount_factor = 0.95f;
     float exploration_rate = 1.0f;
     int episodes = 0;
     const float exploration_decay = 0.9999f;
-    const float min_exploration = 0.01f;
+};
+
+// Performance tracking
+struct Performance {
+    vector<int> scores;
+    vector<float> avg_q_values;
+    vector<int> lengths;
+    vector<float> avg_rewards;
 };
 
 // SDL resources
 struct SDLResources {
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    SDL_Surface* screen = nullptr;
 };
 
 // Global game objects
 GameState game;
 QLearning q_learning;
+Performance performance;
 SDLResources sdl;
 
-// Helper functions
-std::vector<std::vector<int>> generateAllPositions() {
-    std::vector<std::vector<int>> positions;
-    positions.reserve(WIDTH * HEIGHT);
+// Forward declarations
+float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed);
+vector<int> findSafeDirections(int x, int y, int current_dir);
+
+// Function to get dynamic minimum exploration
+float getMinExploration() {
+    return q_learning.episodes < 1000000 ? 0.001f : 0.0001f;
+}
+
+#ifdef __EMSCRIPTEN__
+EM_JS(void, initChartJS, (), {
+    function initializeCharts() {
+        if (typeof Chart === 'undefined' || !Module.canvas) {
+            setTimeout(initializeCharts, 100);
+            return;
+        }
+
+        var container = document.getElementById('chart-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'chart-container';
+            container.style.width = '800px';
+            container.style.margin = '20px auto';
+            container.style.padding = '20px';
+            container.style.backgroundColor = '#333';
+            document.body.insertBefore(container, Module.canvas.nextSibling);
+        }
+
+        ['scoreChart', 'qValueChart', 'lifetimeChart'].forEach(id => {
+            if (!document.getElementById(id)) {
+                var canvas = document.createElement('canvas');
+                canvas.id = id;
+                canvas.style.marginBottom = '20px';
+                container.appendChild(canvas);
+            }
+        });
+
+        window.scoreChart = new Chart(document.getElementById('scoreChart'), {
+            type: 'line',
+            data: { labels: [], datasets: [{
+                label: 'Episode Score',
+                data: [],
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1,
+                fill: false
+            }]},
+            options: { responsive: true, scales: { y: { beginAtZero: true } } }
+        });
+
+        window.qValueChart = new Chart(document.getElementById('qValueChart'), {
+            type: 'line',
+            data: { labels: [], datasets: [{
+                label: 'Average Q Value',
+                data: [],
+                borderColor: 'rgba(153, 102, 255, 1)',
+                borderWidth: 1,
+                fill: false
+            }]},
+            options: { responsive: true, scales: { y: { beginAtZero: true } } }
+        });
+
+        window.lifetimeChart = new Chart(document.getElementById('lifetimeChart'), {
+            type: 'line',
+            data: { labels: [], datasets: [{
+                label: 'Lifetime Score',
+                data: [],
+                borderColor: 'rgba(255, 99, 132, 1)',
+                borderWidth: 1,
+                fill: false
+            }]},
+            options: { responsive: true, scales: { y: { beginAtZero: true } } }
+        });
+    }
+
+    if (document.readyState === 'complete') {
+        initializeCharts();
+    } else {
+        document.addEventListener('DOMContentLoaded', initializeCharts);
+    }
+});
+
+EM_JS(void, updateCharts, (int episode, int score, float avg_q, float exploration, int lifetime_score), {
+    try {
+        var statusElement = document.getElementById('status');
+        if (statusElement) {
+            statusElement.innerHTML = 
+                `Episode: ${episode} | Score: ${score} | Lifetime: ${lifetime_score} | Avg Q: ${avg_q.toFixed(2)} | Exploration: ${exploration.toFixed(4)}`;
+        }
+        
+        if (window.scoreChart && window.qValueChart && window.lifetimeChart) {
+            function updateChart(chart, value) {
+                chart.data.labels.push(episode);
+                chart.data.datasets[0].data.push(value);
+                if (chart.data.labels.length > 500) {
+                    chart.data.labels.shift();
+                    chart.data.datasets[0].data.shift();
+                }
+                chart.update();
+            }
+            
+            updateChart(window.scoreChart, score);
+            updateChart(window.qValueChart, avg_q);
+            updateChart(window.lifetimeChart, lifetime_score);
+        }
+    } catch(e) {
+        console.error('Chart update error:', e);
+    }
+});
+#endif
+
+extern "C" {
+    EMSCRIPTEN_KEEPALIVE
+    float getExplorationRate() {
+        return q_learning.exploration_rate;
+    }
+}
+
+vector<vector<int>> generateAllPositions() {
+    vector<vector<int>> positions(WIDTH * HEIGHT, vector<int>(2));
+    int idx = 0;
     for (int i = 0; i < HEIGHT; ++i) {
-        for (int j = 0; j < WIDTH; ++j) {
-            positions.push_back({i, j});
+        for (int j = 0; j < WIDTH; ++j, ++idx) {
+            positions[idx] = {i, j};
         }
     }
     return positions;
 }
 
-std::vector<std::vector<int>> getFreePositions(const std::vector<std::vector<int>>& occupied) {
-    auto all = generateAllPositions();
-    std::vector<std::vector<int>> free;
-    free.reserve(all.size());
-    
-    for (const auto& pos : all) {
-        bool occupied_pos = false;
-        for (const auto& occ : occupied) {
-            if (pos[0] == occ[0] && pos[1] == occ[1]) {
-                occupied_pos = true;
-                break;
-            }
-        }
-        if (!occupied_pos) {
-            free.push_back(pos);
-        }
+vector<vector<int>> getFreePositions(const vector<vector<int>>& occupied, const vector<vector<int>>& all) {
+    vector<vector<int>> free = all;
+    for (const auto& pos : occupied) {
+        free.erase(remove(free.begin(), free.end(), pos), free.end());
     }
     return free;
 }
@@ -197,68 +213,15 @@ bool isValidPosition(int x, int y) {
 bool isBodyPosition(int x, int y, bool include_head = true) {
     for (size_t i = include_head ? 0 : 1; i < game.body.size(); ++i) {
         const auto& seg = game.body[i];
-        if (seg[0] == x && seg[1] == y) {
+        if (seg.size() == 2 && seg[0] == x && seg[1] == y) {
             return true;
         }
     }
     return false;
 }
 
-void calculateDistanceMetrics() {
-    if (game.body.size() <= 1) {
-        game.avg_head_body_distance = 0;
-        game.min_head_body_distance = 999;
-        game.max_head_body_distance = 0;
-        return;
-    }
-    
-    float total_distance = 0;
-    float current_min = 999;
-    float current_max = 0;
-    int count = 0;
-    
-    for (size_t i = 1; i < game.body.size(); ++i) {
-        const auto& seg = game.body[i];
-        float dx = game.head_x - seg[0];
-        float dy = game.head_y - seg[1];
-        float dist = sqrt(dx*dx + dy*dy);
-        
-        total_distance += dist;
-        current_min = std::min(current_min, dist);
-        current_max = std::max(current_max, dist);
-        count++;
-    }
-    
-    game.avg_head_body_distance = count > 0 ? total_distance / count : 0;
-    game.min_head_body_distance = current_min;
-    game.max_head_body_distance = current_max;
-}
-
-float calculateDistanceReward() {
-    if (game.min_head_body_distance < 1.0f) {
-        return -50.0f;
-    }
-    
-    if (game.min_head_body_distance < OPTIMAL_MIN_DISTANCE) {
-        return -10.0f * (OPTIMAL_MIN_DISTANCE - game.min_head_body_distance);
-    }
-    
-    if (game.min_head_body_distance >= OPTIMAL_MIN_DISTANCE && 
-        game.min_head_body_distance <= OPTIMAL_MAX_DISTANCE) {
-        return 5.0f;
-    }
-    
-    if (game.min_head_body_distance > OPTIMAL_MAX_DISTANCE) {
-        return 2.0f;
-    }
-    
-    return 0.0f;
-}
-
 void initQTable() {
-    int state_space_size = WIDTH * HEIGHT * 4 * 8 * 8;
-    q_learning.table.resize(state_space_size);
-    
+    q_learning.table.resize(WIDTH * HEIGHT * 128);
     for (auto& row : q_learning.table) {
         row.assign(4, 0.0f);
     }
@@ -268,38 +231,94 @@ int getStateIndex(int x, int y, int dir) {
     if (!isValidPosition(x, y)) return 0;
     
     int food_dir = 0;
-    if (game.food_x > x) food_dir |= 1;
-    else if (game.food_x < x) food_dir |= 2;
+    if (game.food_x > x) food_dir = 1;
+    else if (game.food_x < x) food_dir = 2;
     if (game.food_y > y) food_dir |= 4;
+    else if (game.food_y < y) food_dir |= 8;
     
     int danger = 0;
     if (!isValidPosition(x-1, y) || isBodyPosition(x-1, y, false)) danger |= 1;
     if (!isValidPosition(x+1, y) || isBodyPosition(x+1, y, false)) danger |= 2;
     if (!isValidPosition(x, y-1) || isBodyPosition(x, y-1, false)) danger |= 4;
+    if (!isValidPosition(x, y+1) || isBodyPosition(x, y+1, false)) danger |= 8;
     
-    return ((y * WIDTH + x) * 4 + dir) * 8 + food_dir;
+    return (y * WIDTH + x) * 128 + dir * 32 + food_dir * 4 + danger;
+}
+
+vector<int> findSafeDirections(int x, int y, int current_dir) {
+    vector<int> safe_directions;
+    vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    
+    for (int i = 0; i < 4; i++) {
+        int new_x = x + directions[i].first;
+        int new_y = y + directions[i].second;
+        
+        if (isValidPosition(new_x, new_y) && !isBodyPosition(new_x, new_y, false)) {
+            safe_directions.push_back(i);
+        }
+    }
+    
+    // If no safe directions, try to find the least dangerous one
+    if (safe_directions.empty()) {
+        for (int i = 0; i < 4; i++) {
+            int new_x = x + directions[i].first;
+            int new_y = y + directions[i].second;
+            
+            if (isValidPosition(new_x, new_y)) {
+                safe_directions.push_back(i);
+            }
+        }
+    }
+    
+    // If still no directions, just return current direction
+    if (safe_directions.empty()) {
+        safe_directions.push_back(current_dir);
+    }
+    
+    return safe_directions;
 }
 
 int chooseAction(int x, int y, int current_dir) {
     if (static_cast<float>(rand()) / RAND_MAX < q_learning.exploration_rate) {
+        vector<int> safe_directions = findSafeDirections(x, y, current_dir);
+        if (!safe_directions.empty()) {
+            return safe_directions[rand() % safe_directions.size()];
+        }
         return rand() % 4;
     }
 
     int state = getStateIndex(x, y, current_dir);
-    if (state >= 0 && state < static_cast<int>(q_learning.table.size())) {
-        return std::distance(q_learning.table[state].begin(),
-                       std::max_element(q_learning.table[state].begin(), 
-                                   q_learning.table[state].end()));
+    if (state >= 0 && state < q_learning.table.size()) {
+        // Only consider safe directions when exploiting
+        vector<int> safe_directions = findSafeDirections(x, y, current_dir);
+        if (safe_directions.empty()) return current_dir;
+        
+        int best_action = safe_directions[0];
+        float best_value = q_learning.table[state][best_action];
+        
+        for (size_t i = 1; i < safe_directions.size(); i++) {
+            int action = safe_directions[i];
+            if (q_learning.table[state][action] > best_value) {
+                best_value = q_learning.table[state][action];
+                best_action = action;
+            }
+        }
+        
+        return best_action;
     }
     
-    return rand() % 4;
+    vector<int> safe_directions = findSafeDirections(x, y, current_dir);
+    if (!safe_directions.empty()) {
+        return safe_directions[rand() % safe_directions.size()];
+    }
+    return current_dir;
 }
 
 void updateQTable(int old_state, int action, int new_state, float reward) {
-    if (old_state >= 0 && old_state < static_cast<int>(q_learning.table.size()) && 
-        new_state >= 0 && new_state < static_cast<int>(q_learning.table.size())) {
-        float best_future = *std::max_element(q_learning.table[new_state].begin(), 
-                                        q_learning.table[new_state].end());
+    if (old_state >= 0 && old_state < q_learning.table.size() && 
+        new_state >= 0 && new_state < q_learning.table.size()) {
+        float best_future = *max_element(q_learning.table[new_state].begin(), 
+                                       q_learning.table[new_state].end());
         q_learning.table[old_state][action] = 
             (1 - q_learning.learning_rate) * q_learning.table[old_state][action] +
             q_learning.learning_rate * (reward + q_learning.discount_factor * best_future);
@@ -310,29 +329,57 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     if (crashed) return -100.0f;
     if (got_food) return 50.0f;
     
-    float prev_food_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
-    float new_food_dist = abs(x - game.food_x) + abs(y - game.food_y);
-    float food_reward = (prev_food_dist - new_food_dist) * 2.0f;
+    float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
+    float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
     
-    float distance_reward = calculateDistanceReward();
-    float movement_penalty = -0.1f;
+    // Add penalty for being near body segments
+    float body_penalty = 0.0f;
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dy = -1; dy <= 1; dy++) {
+            if (dx == 0 && dy == 0) continue;
+            if (isBodyPosition(x + dx, y + dy, false)) {
+                body_penalty -= 10.0f;
+            }
+        }
+    }
     
-    return food_reward + distance_reward + movement_penalty;
+    // Add penalty for moving in circles
+    float circle_penalty = 0.0f;
+    if (game.trail.size() > 10) {
+        for (size_t i = 0; i < game.trail.size() - 1; i++) {
+            if (game.trail[i][0] == x && game.trail[i][1] == y) {
+                circle_penalty -= 5.0f * (game.trail.size() - i);
+                break;
+            }
+        }
+    }
+    
+    // Add reward for exploring new areas
+    float exploration_reward = 0.0f;
+    bool new_position = true;
+    for (const auto& pos : game.trail) {
+        if (pos[0] == x && pos[1] == y) {
+            new_position = false;
+            break;
+        }
+    }
+    if (new_position) exploration_reward += 2.0f;
+    
+    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + exploration_reward;
 }
 
 void resetGame() {
     game.head_x = HEIGHT / 2;
     game.head_y = WIDTH / 2;
-    game.length = 3;
+    game.length = 2;
     game.score = 0;
     game.steps_since_last_food = 0;
-    game.avg_head_body_distance = 0;
-    game.min_head_body_distance = 999;
-    game.max_head_body_distance = 0;
     game.body = {{game.head_x, game.head_y}};
+    game.trail = {{game.head_x, game.head_y}};
     game.crashed = false;
     
-    auto free_positions = getFreePositions(game.body);
+    auto all_positions = generateAllPositions();
+    auto free_positions = getFreePositions(game.trail, all_positions);
     if (!free_positions.empty()) {
         int k = rand() % free_positions.size();
         game.food_x = free_positions[k][0];
@@ -341,7 +388,8 @@ void resetGame() {
 }
 
 void spawnFood() {
-    auto free_positions = getFreePositions(game.body);
+    auto all_positions = generateAllPositions();
+    auto free_positions = getFreePositions(game.trail, all_positions);
     if (!free_positions.empty()) {
         int k = rand() % free_positions.size();
         game.food_x = free_positions[k][0];
@@ -380,19 +428,7 @@ bool moveSnake(int& direction) {
         if (valid) {
             direction = action;
         } else {
-            std::vector<int> safe_actions;
-            for (int i = 0; i < 4; i++) {
-                int test_x = game.head_x, test_y = game.head_y;
-                switch (i) {
-                    case 0: test_x--; break;
-                    case 1: test_x++; break;
-                    case 2: test_y--; break;
-                    case 3: test_y++; break;
-                }
-                if (isValidPosition(test_x, test_y) && !isBodyPosition(test_x, test_y, false)) {
-                    safe_actions.push_back(i);
-                }
-            }
+            vector<int> safe_actions = findSafeDirections(prev_x, prev_y, prev_dir);
             if (!safe_actions.empty()) {
                 direction = safe_actions[rand() % safe_actions.size()];
             } else {
@@ -414,9 +450,14 @@ bool moveSnake(int& direction) {
         return true;
     }
 
+    game.trail.insert(game.trail.begin(), {game.head_x, game.head_y});
+    if (game.trail.size() > game.length + 2) {
+        game.trail.resize(game.length + 2);
+    }
+
     game.body.insert(game.body.begin(), {game.head_x, game.head_y});
     if (game.body.size() > game.length) {
-        game.body.pop_back();
+        game.body.resize(game.length);
     }
 
     if (game.head_x == game.food_x && game.head_y == game.food_y) {
@@ -427,8 +468,6 @@ bool moveSnake(int& direction) {
         spawnFood();
     }
 
-    calculateDistanceMetrics();
-
     if (game.steps_since_last_food > 200) {
         return true;
     }
@@ -438,108 +477,93 @@ bool moveSnake(int& direction) {
 
 void initSDL() {
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
+        cerr << "SDL_Init Error: " << SDL_GetError() << endl;
         exit(1);
     }
 
-    sdl.window = SDL_CreateWindow("AI Snake with Distance Rewards",
+    sdl.window = SDL_CreateWindow("AI Snake",
                                 SDL_WINDOWPOS_CENTERED,
                                 SDL_WINDOWPOS_CENTERED,
                                 WIDTH * CELL_SIZE,
                                 HEIGHT * CELL_SIZE,
                                 SDL_WINDOW_SHOWN);
     if (!sdl.window) {
-        std::cerr << "SDL_CreateWindow Error: " << SDL_GetError() << std::endl;
+        cerr << "SDL_CreateWindow Error: " << SDL_GetError() << endl;
         SDL_Quit();
         exit(1);
     }
 
-    sdl.screen = SDL_GetWindowSurface(sdl.window);
-    if (!sdl.screen) {
-        std::cerr << "SDL_GetWindowSurface Error: " << SDL_GetError() << std::endl;
+    sdl.renderer = SDL_CreateRenderer(sdl.window, -1, 
+                                    SDL_RENDERER_ACCELERATED | 
+                                    SDL_RENDERER_PRESENTVSYNC);
+    if (!sdl.renderer) {
+        cerr << "SDL_CreateRenderer Error: " << SDL_GetError() << endl;
         SDL_DestroyWindow(sdl.window);
         SDL_Quit();
         exit(1);
     }
+
+    if (SDL_SetRenderDrawBlendMode(sdl.renderer, SDL_BLENDMODE_BLEND) != 0) {
+        cerr << "SDL_SetRenderDrawBlendMode Error: " << SDL_GetError() << endl;
+    }
 }
 
 void drawGame() {
-    SDL_FillRect(sdl.screen, NULL, SDL_MapRGB(sdl.screen->format, 0, 0, 0));
+    SDL_SetRenderDrawColor(sdl.renderer, 0, 0, 0, 255);
+    SDL_RenderClear(sdl.renderer);
 
-    SDL_Rect grid_rect;
-    for (int i = 0; i < HEIGHT; ++i) {
-        for (int j = 0; j < WIDTH; ++j) {
-            grid_rect = {j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE};
-            SDL_FillRect(sdl.screen, &grid_rect, 
-                        SDL_MapRGB(sdl.screen->format, 30, 30, 30));
-        }
-    }
+    SDL_SetRenderDrawColor(sdl.renderer, 50, 50, 50, 255);
+    SDL_Rect border = {0, 0, WIDTH * CELL_SIZE, HEIGHT * CELL_SIZE};
+    SDL_RenderDrawRect(sdl.renderer, &border);
 
-    SDL_Rect food_rect = {game.food_y * CELL_SIZE, game.food_x * CELL_SIZE, 
-                         CELL_SIZE, CELL_SIZE};
-    SDL_FillRect(sdl.screen, &food_rect, 
-                SDL_MapRGB(sdl.screen->format, 255, 0, 0));
+    SDL_SetRenderDrawColor(sdl.renderer, 255, 0, 0, 255);
+    SDL_Rect food = {game.food_y * CELL_SIZE, game.food_x * CELL_SIZE, CELL_SIZE, CELL_SIZE};
+    SDL_RenderFillRect(sdl.renderer, &food);
 
-    for (size_t i = 0; i < game.body.size(); ++i) {
+    for (size_t i = 0; i < game.body.size(); i++) {
         const auto& seg = game.body[i];
-        SDL_Rect body_rect = {seg[1] * CELL_SIZE, seg[0] * CELL_SIZE, 
-                             CELL_SIZE, CELL_SIZE};
-        
-        if (i == 0) {
-            SDL_FillRect(sdl.screen, &body_rect, 
-                        SDL_MapRGB(sdl.screen->format, 0, 255, 0));
-        } else {
-            float dx = seg[0] - game.head_x;
-            float dy = seg[1] - game.head_y;
-            float dist = sqrt(dx*dx + dy*dy);
-            
-            int r = std::min(255, static_cast<int>(255 * (1 - dist/10.0f)));
-            int g = 255;
-            int b = 0;
-            
-            SDL_FillRect(sdl.screen, &body_rect, 
-                        SDL_MapRGB(sdl.screen->format, r, g, b));
+        if (seg.size() == 2) {
+            if (i == 0) {
+                SDL_SetRenderDrawColor(sdl.renderer, 0, 255, 0, 255);
+            } else {
+                int intensity = 100 + (155 * i / game.body.size());
+                SDL_SetRenderDrawColor(sdl.renderer, 0, intensity, 0, 255);
+            }
+            SDL_Rect body = {seg[1] * CELL_SIZE, seg[0] * CELL_SIZE, CELL_SIZE, CELL_SIZE};
+            SDL_RenderFillRect(sdl.renderer, &body);
         }
     }
 
-    SDL_UpdateWindowSurface(sdl.window);
+    SDL_RenderPresent(sdl.renderer);
 }
 
 void logPerformance() {
-    if (q_learning.episodes % 100 == 0) {
-        std::cout << "Episode: " << q_learning.episodes 
-             << " | Score: " << game.score 
-             << " | Length: " << game.length
-             << " | Dist: " << game.min_head_body_distance << "-" 
-             << game.max_head_body_distance << " (avg " 
-             << game.avg_head_body_distance << ")"
-             << " | Explore: " << q_learning.exploration_rate << std::endl;
-             
+    if (q_learning.episodes % LOG_INTERVAL == 0) {
+        float total_q = 0;
+        int count = 0;
+        for (const auto& row : q_learning.table) {
+            for (float val : row) {
+                total_q += val;
+                count++;
+            }
+        }
+        float avg_q = count > 0 ? total_q / count : 0;
+
+        performance.scores.push_back(game.score);
+        performance.avg_q_values.push_back(avg_q);
+        performance.lengths.push_back(game.length);
+
         #ifdef __EMSCRIPTEN__
-        updateCharts(q_learning.episodes, game.score, 
-                    game.avg_head_body_distance, game.min_head_body_distance);
+        updateCharts(q_learning.episodes, game.score, avg_q, q_learning.exploration_rate, game.lifetime_score);
+        #else
+        cout << "Episode: " << q_learning.episodes 
+             << " | Score: " << game.score 
+             << " | Lifetime: " << game.lifetime_score
+             << " | Avg Q: " << avg_q
+             << " | Exploration: " << q_learning.exploration_rate << endl;
         #endif
     }
 }
-
-#ifdef __EMSCRIPTEN__
-extern "C" {
-    EMSCRIPTEN_KEEPALIVE
-    float getExplorationRate() {
-        return q_learning.exploration_rate;
-    }
-    
-    EMSCRIPTEN_KEEPALIVE
-    float getAverageDistance() {
-        return game.avg_head_body_distance;
-    }
-    
-    EMSCRIPTEN_KEEPALIVE
-    int getScore() {
-        return game.score;
-    }
-}
-#endif
 
 void mainLoop() {
     static int direction = rand() % 4;
@@ -558,30 +582,34 @@ void mainLoop() {
 
     if (q_learning.episodes < MAX_TRAINING_EPISODES) {
         q_learning.episodes++;
-        q_learning.exploration_rate = std::max(q_learning.min_exploration, 
-                                        q_learning.exploration_rate * q_learning.exploration_decay);
+        q_learning.exploration_rate = max(getMinExploration(), 
+                                         q_learning.exploration_rate * q_learning.exploration_decay);
         logPerformance();
     }
 
     if (crashed) {
-        reset_timer = 10;
+        reset_timer = 5;
     }
 }
 
 void cleanup() {
+    SDL_DestroyRenderer(sdl.renderer);
     SDL_DestroyWindow(sdl.window);
     SDL_Quit();
 }
 
 int main() {
-    std::srand(static_cast<unsigned>(std::time(nullptr)));
+    srand((unsigned)time(nullptr));
 
     #ifdef __EMSCRIPTEN__
+    export_functions();
     initChartJS();
     #endif
 
+    auto all_positions = generateAllPositions();
     game.body = {{HEIGHT/2, WIDTH/2}};
-    auto free_positions = getFreePositions(game.body);
+    game.trail = {{HEIGHT/2, WIDTH/2}};
+    auto free_positions = getFreePositions(game.trail, all_positions);
     if (!free_positions.empty()) {
         game.food_x = free_positions[0][0];
         game.food_y = free_positions[0][1];
@@ -593,9 +621,34 @@ int main() {
     #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop(mainLoop, 0, 1);
     #else
+    int direction = rand() % 4;
+    int reset_timer = 0;
+    
     bool running = true;
     while (running) {
-        mainLoop();
+        if (reset_timer > 0) {
+            reset_timer--;
+            if (reset_timer == 0) {
+                resetGame();
+            }
+            SDL_Delay(game.speed);
+            continue;
+        }
+
+        bool crashed = moveSnake(direction);
+        drawGame();
+        SDL_Delay(game.speed);
+
+        if (q_learning.episodes < MAX_TRAINING_EPISODES) {
+            q_learning.episodes++;
+            q_learning.exploration_rate = max(getMinExploration(), 
+                                            q_learning.exploration_rate * q_learning.exploration_decay);
+            logPerformance();
+        }
+
+        if (crashed) {
+            reset_timer = 5;
+        }
 
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -603,8 +656,6 @@ int main() {
                 running = false;
             }
         }
-        
-        SDL_Delay(game.speed);
     }
     #endif
 
