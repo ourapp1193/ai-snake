@@ -255,7 +255,7 @@ vector<int> findSafeDirections(int x, int y) {
         int new_x = x + directions[i].first;
         int new_y = y + directions[i].second;
         
-        if (isPositionSafe(new_x, new_y) {
+        if (isPositionSafe(new_x, new_y)) {
             safe_directions.push_back(i);
         }
     }
