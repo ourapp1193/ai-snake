@@ -84,8 +84,7 @@ bool willCauseTrap(int x, int y, int dir);
 bool isPositionValid(int x, int y);
 void cleanupBeforeUnload();
 void initializeGame();
-float getMinExploration();
-void updateCharts(int episode, int score, float avg_q, float exploration, int lifetime_score);
+extern "C" void updateCharts(int episode, int score, float avg_q, float exploration, int lifetime_score);
 
 vector<vector<int>> generateAllPositions() {
     vector<vector<int>> positions(WIDTH * HEIGHT, vector<int>(2));
@@ -548,8 +547,11 @@ void logPerformance() {
     }
 }
 
-float getMinExploration() {
-    return q_learning.min_exploration;
+extern "C" {
+    EMSCRIPTEN_KEEPALIVE
+    float getMinExploration() {
+        return q_learning.min_exploration;
+    }
 }
 
 void initializeGame() {
@@ -582,7 +584,7 @@ void mainLoop() {
 
     if (q_learning.episodes < MAX_TRAINING_EPISODES) {
         q_learning.episodes++;
-        q_learning.exploration_rate = max(getMinExploration(), 
+        q_learning.exploration_rate = max(q_learning.min_exploration, 
                                          q_learning.exploration_rate * q_learning.exploration_decay);
         logPerformance();
     }
@@ -608,11 +610,6 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     float getExplorationRate() {
         return q_learning.exploration_rate;
-    }
-
-    EMSCRIPTEN_KEEPALIVE
-    float getMinExploration() {
-        return q_learning.min_exploration;
     }
 
     EMSCRIPTEN_KEEPALIVE
@@ -793,7 +790,7 @@ int main() {
 
         if (q_learning.episodes < MAX_TRAINING_EPISODES) {
             q_learning.episodes++;
-            q_learning.exploration_rate = max(getMinExploration(), 
+            q_learning.exploration_rate = max(q_learning.min_exploration, 
                                             q_learning.exploration_rate * q_learning.exploration_decay);
             logPerformance();
         }
