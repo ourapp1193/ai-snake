@@ -298,7 +298,7 @@ vector<int> findSafeDirections(int x, int y, int current_dir) {
         int new_x = x + directions[i].first;
         int new_y = y + directions[i].second;
         
-        if (isValidPosition(new_x, new_y) && !isBodyPosition(new_x, new_y, false) {
+        if (isValidPosition(new_x, new_y) && !isBodyPosition(new_x, new_y, false)) {
             if (!isDangerousMove(x, y, i)) {
                 safe_directions.push_back(i);
             }
