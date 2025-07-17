@@ -243,7 +243,6 @@ bool isPositionSafe(int x, int y) {
 }
 
 bool willCauseTrap(int x, int y, int dir) {
-    // Simulate the move
     int new_x = x, new_y = y;
     switch (dir) {
         case 0: new_x--; break;
@@ -317,10 +316,7 @@ vector<int> findSafeDirections(int x, int y) {
 
 void initQTable() {
     const int STATE_SPACE_SIZE = WIDTH * HEIGHT * 16;
-    q_learning.table.resize(STATE_SPACE_SIZE);
-    for (auto& row : q_learning.table) {
-        row.assign(4, 0.0f);
-    }
+    q_learning.table.resize(STATE_SPACE_SIZE, vector<float>(4, 0.0f));
 }
 
 int getSafeStateIndex(int x, int y, int dir) {
@@ -351,8 +347,9 @@ bool shouldExplore() {
 }
 
 int chooseAction(int x, int y, int current_dir) {
+    vector<int> safe_directions = findSafeDirections(x, y);
+    
     if (shouldExplore()) {
-        vector<int> safe_directions = findSafeDirections(x, y);
         if (!safe_directions.empty()) {
             return safe_directions[rand() % safe_directions.size()];
         }
@@ -361,7 +358,6 @@ int chooseAction(int x, int y, int current_dir) {
 
     int state = getSafeStateIndex(x, y, current_dir);
     if (state >= 0 && state < q_learning.table.size()) {
-        vector<int> safe_directions = findSafeDirections(x, y);
         if (safe_directions.empty()) {
             safe_directions = {current_dir};
         }
@@ -371,16 +367,15 @@ int chooseAction(int x, int y, int current_dir) {
         
         for (size_t i = 1; i < safe_directions.size(); i++) {
             int action = safe_directions[i];
-            if (q_learning.table[state][action] > best_value) {
+            if (action >= 0 && action < 4 && 
+                q_learning.table[state][action] > best_value) {
                 best_value = q_learning.table[state][action];
                 best_action = action;
             }
         }
-        
         return best_action;
     }
     
-    vector<int> safe_directions = findSafeDirections(x, y);
     if (!safe_directions.empty()) {
         return safe_directions[rand() % safe_directions.size()];
     }
@@ -388,14 +383,19 @@ int chooseAction(int x, int y, int current_dir) {
 }
 
 void updateQTable(int old_state, int action, int new_state, float reward) {
-    if (old_state >= 0 && old_state < q_learning.table.size() && 
+    if (old_state >= 0 && old_state < q_learning.table.size() &&
         new_state >= 0 && new_state < q_learning.table.size() &&
         action >= 0 && action < 4) {
-        float best_future = *max_element(q_learning.table[new_state].begin(), 
-                                       q_learning.table[new_state].end());
-        q_learning.table[old_state][action] = 
+        
+        float max_future = 0.0f;
+        if (!q_learning.table[new_state].empty()) {
+            max_future = *max_element(q_learning.table[new_state].begin(),
+                                    q_learning.table[new_state].end());
+        }
+        
+        q_learning.table[old_state][action] =
             (1 - q_learning.learning_rate) * q_learning.table[old_state][action] +
-            q_learning.learning_rate * (reward + q_learning.discount_factor * best_future);
+            q_learning.learning_rate * (reward + q_learning.discount_factor * max_future);
     }
 }
 
