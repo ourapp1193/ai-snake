@@ -1,134 +1,121 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
+
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Snake Game</title>
+    <title>AI Snake Training</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #000;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
+        body {
             font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #222;
             color: white;
         }
+
         #container {
             display: flex;
-            flex-direction: column;
-            align-items: center;
+            width: 100%;
         }
-        #canvas {
-            display: block;
-            background-color: black;
-        }
+
         #status {
-            margin: 10px 0;
-            padding: 10px;
-            background-color: #333;
-            border-radius: 5px;
             text-align: center;
-        }
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 24px;
-        }
-        #debug {
-            position: fixed;
-            bottom: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
+            margin-bottom: 20px;
             padding: 10px;
+            background: #333;
             border-radius: 5px;
-            max-width: 80%;
         }
+
+        #game-canvas {
+            display: block;
+            margin: 20px auto;
+            background: black;
+        }
+
+        #loading {
+            text-align: center;
+            margin: 20px;
+            font-size: 18px;
+        }
+
+        #chart-container {
+            display: flex;
+            margin-top: 20px;
+        }
+
+        .chart {
+            height: 130px;
+        }
+
         .hidden {
             display: none;
         }
     </style>
-    
 </head>
+
 <body>
-    <div id="loading">Loading game...</div>
-    <div id="container" class="hidden">
-        <div id="status">Initializing AI Snake...</div>
-        <canvas id="canvas"></canvas>
+    <div id="status" class="hidden">Loading game...</div>
+    <div id="container">
+
+        <canvas id="game-canvas" width="400" height="400" class="hidden"></canvas>
+        <div id="chart-container" class="hidden">
+            <div class="chart">
+                <canvas id="scoreChart"></canvas>
+            </div>
+            <div class="chart">
+                <canvas id="qValueChart"></canvas>
+            </div>
+            <div class="chart">
+                <canvas id="lifetimeChart"></canvas>
+            </div>
+        </div>
     </div>
-    <div id="debug"></div>
 
     <script>
-        function debugLog(message) {
-            const debugDiv = document.getElementById('debug');
-            debugDiv.innerHTML += message + '<br>';
-            console.log(message);
-        }
-
-        debugLog('Starting game initialization...');
-
         var Module = {
-            canvas: (function() {
-                var canvas = document.getElementById('canvas');
-                canvas.width = 20 * 20;  // WIDTH * CELL_SIZE
-                canvas.height = 20 * 20; // HEIGHT * CELL_SIZE
-                
-                canvas.addEventListener('webglcontextlost', function(e) {
-                    debugLog('WebGL context lost!');
+            canvas: (function () {
+                var canvas = document.getElementById('game-canvas');
+                canvas.addEventListener('webglcontextlost', function (e) {
                     alert('WebGL context lost. Please reload the page.');
                     e.preventDefault();
                 }, false);
                 return canvas;
             })(),
 
-            print: function(text) {
-                debugLog('stdout: ' + text);
-            },
+            onRuntimeInitialized: function () {
+                // Hide loading indicator
+                var loadingElement = document.getElementById('loading');
+                if (loadingElement) loadingElement.classList.add('hidden');
 
-            printErr: function(text) {
-                debugLog('stderr: ' + text);
-                this.setStatus('Error: ' + text);
-            },
-
-            setStatus: function(text) {
-                debugLog('Status: ' + text);
+                // Show game elements
                 var statusElement = document.getElementById('status');
+                var canvasElement = document.getElementById('game-canvas');
+                var chartContainer = document.getElementById('chart-container');
+
                 if (statusElement) {
-                    statusElement.textContent = text;
+                    statusElement.classList.remove('hidden');
+                    statusElement.textContent = 'Game loaded - training started';
+                }
+
+                if (canvasElement) {
+                    canvasElement.classList.remove('hidden');
+                }
+
+                if (chartContainer) {
+                    chartContainer.classList.remove('hidden');
                 }
             },
 
-            onRuntimeInitialized: function() {
-                debugLog('Runtime initialized!');
-                document.getElementById('loading').classList.add('hidden');
-                document.getElementById('container').classList.remove('hidden');
-                
-                try {
-                    debugLog('Calling _main()...');
-                    Module._main();
-                    debugLog('_main() called successfully');
-                } catch(e) {
-                    debugLog('Error in _main(): ' + e);
-                    console.error(e);
-                    this.setStatus('Error: ' + e.message);
-                }
-            },
-
-            onAbort: function(reason) {
-                debugLog('Aborted: ' + reason);
-                this.setStatus('Aborted: ' + reason);
+            printErr: function (text) {
+                console.error(text);
+                var statusElement = document.getElementById('status');
+                if (statusElement) statusElement.textContent = 'Error: ' + text;
             }
         };
-
-        debugLog('Module configuration complete');
-        {{{ SCRIPT }}}
     </script>
+
+    {{{ SCRIPT }}}
 </body>
+
 </html>
