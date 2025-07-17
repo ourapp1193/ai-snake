@@ -12,6 +12,7 @@
 
 EM_JS(void, export_functions, (), {
     Module['getExplorationRate'] = Module.cwrap('getExplorationRate', 'number', []);
+    Module['getMinExploration'] = Module.cwrap('getMinExploration', 'number', []);
 });
 #endif
 
@@ -83,6 +84,8 @@ bool willCauseTrap(int x, int y, int dir);
 bool isPositionValid(int x, int y);
 void cleanupBeforeUnload();
 void initializeGame();
+float getMinExploration();
+void updateCharts(int episode, int score, float avg_q, float exploration, int lifetime_score);
 
 vector<vector<int>> generateAllPositions() {
     vector<vector<int>> positions(WIDTH * HEIGHT, vector<int>(2));
@@ -545,6 +548,10 @@ void logPerformance() {
     }
 }
 
+float getMinExploration() {
+    return q_learning.min_exploration;
+}
+
 void initializeGame() {
     static bool initialized = false;
     if (initialized) return;
@@ -601,6 +608,11 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     float getExplorationRate() {
         return q_learning.exploration_rate;
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    float getMinExploration() {
+        return q_learning.min_exploration;
     }
 
     EMSCRIPTEN_KEEPALIVE
