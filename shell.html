@@ -16,6 +16,8 @@
 
         #container {
             display: flex;
+            flex-direction: column;
+            align-items: center;
             width: 100%;
         }
 
@@ -25,6 +27,12 @@
             padding: 10px;
             background: #333;
             border-radius: 5px;
+            width: 100%;
+            max-width: 800px;
+        }
+
+        #game-container {
+            position: relative;
         }
 
         #game-canvas {
@@ -39,26 +47,70 @@
             font-size: 18px;
         }
 
+        #error {
+            color: #ff5555;
+            text-align: center;
+            margin: 20px;
+            padding: 15px;
+            background: #330000;
+            border-radius: 5px;
+            display: none;
+        }
+
         #chart-container {
             display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
             margin-top: 20px;
+            width: 100%;
+            max-width: 1200px;
         }
 
         .chart {
-            height: 130px;
+            height: 200px;
+            width: 400px;
+            margin: 10px;
+            background: #333;
+            border-radius: 5px;
+            padding: 10px;
         }
 
         .hidden {
             display: none;
         }
+
+        .progress-bar {
+            width: 100%;
+            background-color: #444;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .progress {
+            height: 20px;
+            background-color: #4CAF50;
+            border-radius: 5px;
+            width: 0%;
+            transition: width 0.3s;
+        }
     </style>
 </head>
 
 <body>
-    <div id="status" class="hidden">Loading game...</div>
+    <div id="status">Initializing game...</div>
+    <div id="error" class="hidden"></div>
+    <div id="loading">
+        <p>Loading game assets...</p>
+        <div class="progress-bar">
+            <div class="progress" id="load-progress"></div>
+        </div>
+    </div>
+    
     <div id="container">
-
-        <canvas id="game-canvas" width="400" height="400" class="hidden"></canvas>
+        <div id="game-container">
+            <canvas id="game-canvas" width="400" height="400" class="hidden"></canvas>
+        </div>
+        
         <div id="chart-container" class="hidden">
             <div class="chart">
                 <canvas id="scoreChart"></canvas>
@@ -73,48 +125,130 @@
     </div>
 
     <script>
+        // Initialize charts early
+        function initializeCharts() {
+            window.scoreChart = new Chart(document.getElementById('scoreChart'), {
+                type: 'line',
+                data: { labels: [], datasets: [{
+                    label: 'Episode Score',
+                    data: [],
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1,
+                    fill: false
+                }]},
+                options: { 
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+
+            window.qValueChart = new Chart(document.getElementById('qValueChart'), {
+                type: 'line',
+                data: { labels: [], datasets: [{
+                    label: 'Average Q Value',
+                    data: [],
+                    borderColor: 'rgba(153, 102, 255, 1)',
+                    borderWidth: 1,
+                    fill: false
+                }]},
+                options: { 
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+
+            window.lifetimeChart = new Chart(document.getElementById('lifetimeChart'), {
+                type: 'line',
+                data: { labels: [], datasets: [{
+                    label: 'Lifetime Score',
+                    data: [],
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 1,
+                    fill: false
+                }]},
+                options: { 
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+        }
+
+        // Enhanced Module configuration
         var Module = {
-            canvas: (function () {
+            canvas: (function() {
                 var canvas = document.getElementById('game-canvas');
-                canvas.addEventListener('webglcontextlost', function (e) {
-                    alert('WebGL context lost. Please reload the page.');
+                canvas.addEventListener('webglcontextlost', function(e) {
+                    showError('WebGL context lost. Please reload the page.');
                     e.preventDefault();
                 }, false);
                 return canvas;
             })(),
 
-            onRuntimeInitialized: function () {
-                // Hide loading indicator
-                var loadingElement = document.getElementById('loading');
-                if (loadingElement) loadingElement.classList.add('hidden');
+            onRuntimeInitialized: function() {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('status').textContent = 'Game loaded - training started';
+                document.getElementById('game-canvas').classList.remove('hidden');
+                document.getElementById('chart-container').classList.remove('hidden');
+                
+                // Update status periodically
+                setInterval(function() {
+                    if (typeof Module.getExplorationRate === 'function') {
+                        document.getElementById('status').textContent = 
+                            'Training in progress... Exploration rate: ' + 
+                            Module.getExplorationRate().toFixed(4);
+                    }
+                }, 1000);
+            },
 
-                // Show game elements
-                var statusElement = document.getElementById('status');
-                var canvasElement = document.getElementById('game-canvas');
-                var chartContainer = document.getElementById('chart-container');
+            onAbort: function(error) {
+                showError('Game failed to load: ' + error);
+            },
 
-                if (statusElement) {
-                    statusElement.classList.remove('hidden');
-                    statusElement.textContent = 'Game loaded - training started';
-                }
-
-                if (canvasElement) {
-                    canvasElement.classList.remove('hidden');
-                }
-
-                if (chartContainer) {
-                    chartContainer.classList.remove('hidden');
+            setStatus: function(text) {
+                console.log(text);
+                document.getElementById('status').textContent = text;
+                if (text.startsWith('Downloading') || text.startsWith('Preparing')) {
+                    updateProgress(text);
                 }
             },
 
-            printErr: function (text) {
-                console.error(text);
-                var statusElement = document.getElementById('status');
-                if (statusElement) statusElement.textContent = 'Error: ' + text;
+            monitorRunDependencies: function(left) {
+                if (left === 0) {
+                    Module.onRuntimeInitialized();
+                }
             }
         };
+
+        function updateProgress(text) {
+            var match = text.match(/(\d+)%/);
+            if (match) {
+                var percent = parseInt(match[1]);
+                document.getElementById('load-progress').style.width = percent + '%';
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('loading').classList.add('hidden');
+            var errorElement = document.getElementById('error');
+            errorElement.textContent = message;
+            errorElement.classList.remove('hidden');
+            console.error(message);
+        }
+
+        // Initialize charts when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            try {
+                initializeCharts();
+            } catch (e) {
+                showError('Chart initialization error: ' + e.message);
+            }
+        });
     </script>
 
+    <!-- Emscripten will automatically replace this with the correct script tags -->
     {{{ SCRIPT }}}
 </body>
 
