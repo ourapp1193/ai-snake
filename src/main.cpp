@@ -73,6 +73,7 @@ SDLResources sdl;
 // Forward declarations
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed);
 vector<int> findSafeDirections(int x, int y, int current_dir);
+bool isDangerousMove(int x, int y, int dir);
 
 // Function to get dynamic minimum exploration
 float getMinExploration() {
@@ -245,6 +246,50 @@ int getStateIndex(int x, int y, int dir) {
     return (y * WIDTH + x) * 128 + dir * 32 + food_dir * 4 + danger;
 }
 
+bool isDangerousMove(int x, int y, int dir) {
+    // Check if moving in this direction would trap the snake between body segments
+    vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    
+    // Calculate new position after move
+    int new_x = x + directions[dir].first;
+    int new_y = y + directions[dir].second;
+    
+    if (!isValidPosition(new_x, new_y)) return true;
+    
+    // Check if the new position is surrounded by body segments
+    int blocked_sides = 0;
+    for (int i = 0; i < 4; i++) {
+        int nx = new_x + directions[i].first;
+        int ny = new_y + directions[i].second;
+        
+        if (!isValidPosition(nx, ny) || isBodyPosition(nx, ny, false)) {
+            blocked_sides++;
+        }
+    }
+    
+    // If 3 sides are blocked, it's a dangerous move
+    if (blocked_sides >= 3) {
+        return true;
+    }
+    
+    // Check if this move would create a situation where the snake is between body segments
+    // with no way out
+    bool has_escape = false;
+    for (int i = 0; i < 4; i++) {
+        if (i == dir) continue; // Skip current direction
+        
+        int nx = new_x + directions[i].first;
+        int ny = new_y + directions[i].second;
+        
+        if (isValidPosition(nx, ny) && !isBodyPosition(nx, ny, false)) {
+            has_escape = true;
+            break;
+        }
+    }
+    
+    return !has_escape;
+}
+
 vector<int> findSafeDirections(int x, int y, int current_dir) {
     vector<int> safe_directions;
     vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
@@ -253,8 +298,10 @@ vector<int> findSafeDirections(int x, int y, int current_dir) {
         int new_x = x + directions[i].first;
         int new_y = y + directions[i].second;
         
-        if (isValidPosition(new_x, new_y) && !isBodyPosition(new_x, new_y, false)) {
-            safe_directions.push_back(i);
+        if (isValidPosition(new_x, new_y) && !isBodyPosition(new_x, new_y, false) {
+            if (!isDangerousMove(x, y, i)) {
+                safe_directions.push_back(i);
+            }
         }
     }
     
@@ -354,6 +401,14 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
         }
     }
     
+    // Add penalty for dangerous moves
+    float danger_penalty = 0.0f;
+    for (int dir = 0; dir < 4; dir++) {
+        if (isDangerousMove(x, y, dir)) {
+            danger_penalty -= 20.0f;
+        }
+    }
+    
     // Add reward for exploring new areas
     float exploration_reward = 0.0f;
     bool new_position = true;
@@ -365,7 +420,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     }
     if (new_position) exploration_reward += 2.0f;
     
-    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + exploration_reward;
+    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + danger_penalty + exploration_reward;
 }
 
 void resetGame() {
