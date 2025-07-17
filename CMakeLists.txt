@@ -8,7 +8,7 @@ if(EMSCRIPTEN)
     
     set(CMAKE_EXE_LINKER_FLAGS
         "${CMAKE_EXE_LINKER_FLAGS} \
-        -sUSE_SDL=1 \
+        -sUSE_SDL=2 \
         -sUSE_WEBGL2=1 \
         -sALLOW_MEMORY_GROWTH=1 \
         -sASSERTIONS=1 \
