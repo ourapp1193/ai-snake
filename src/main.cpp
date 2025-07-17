@@ -84,7 +84,18 @@ bool willCauseTrap(int x, int y, int dir);
 bool isPositionValid(int x, int y);
 void cleanupBeforeUnload();
 void initializeGame();
-extern "C" void updateCharts(int episode, int score, float avg_q, float exploration, int lifetime_score);
+
+#ifdef __EMSCRIPTEN__
+void updateCharts(int episode, int score, float avg_q, float exploration, int lifetime_score);
+#else
+void updateCharts(int episode, int score, float avg_q, float exploration, int lifetime_score) {
+    cout << "Episode: " << episode 
+         << " | Score: " << score 
+         << " | Lifetime: " << lifetime_score
+         << " | Avg Q: " << avg_q
+         << " | Exploration: " << exploration << endl;
+}
+#endif
 
 vector<vector<int>> generateAllPositions() {
     vector<vector<int>> positions(WIDTH * HEIGHT, vector<int>(2));
@@ -535,15 +546,7 @@ void logPerformance() {
         performance.avg_q_values.push_back(avg_q);
         performance.lengths.push_back(game.length);
 
-        #ifdef __EMSCRIPTEN__
         updateCharts(q_learning.episodes, game.score, avg_q, q_learning.exploration_rate, game.lifetime_score);
-        #else
-        cout << "Episode: " << q_learning.episodes 
-             << " | Score: " << game.score 
-             << " | Lifetime: " << game.lifetime_score
-             << " | Avg Q: " << avg_q
-             << " | Exploration: " << q_learning.exploration_rate << endl;
-        #endif
     }
 }
 
@@ -793,10 +796,6 @@ int main() {
             q_learning.exploration_rate = max(q_learning.min_exploration, 
                                             q_learning.exploration_rate * q_learning.exploration_decay);
             logPerformance();
-        }
-
-        if (crashed) {
-            reset_timer = 5;
         }
 
         SDL_Event event;
