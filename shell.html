@@ -16,6 +16,8 @@
 
         #container {
             display: flex;
+            flex-direction: column;
+            align-items: center;
             width: 100%;
         }
 
@@ -25,12 +27,15 @@
             padding: 10px;
             background: #333;
             border-radius: 5px;
+            width: 90%;
+            max-width: 800px;
         }
 
         #game-canvas {
             display: block;
             margin: 20px auto;
             background: black;
+            border: 2px solid #444;
         }
 
         #loading {
@@ -41,35 +46,49 @@
 
         #chart-container {
             display: flex;
+            flex-direction: column;
+            width: 90%;
+            max-width: 800px;
             margin-top: 20px;
         }
 
-        .chart {
-            height: 130px;
+        .chart-container {
+            margin-bottom: 20px;
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
         }
 
         .hidden {
             display: none;
         }
+
+        .error {
+            color: #ff5555;
+            padding: 10px;
+            background: #330000;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
     </style>
 </head>
 
 <body>
-    <div id="status" class="hidden">Loading game...</div>
+    <div id="status">Initializing game...</div>
     <div id="container">
-
         <canvas id="game-canvas" width="400" height="400" class="hidden"></canvas>
         <div id="chart-container" class="hidden">
-            <div class="chart">
+            <div class="chart-container">
                 <canvas id="scoreChart"></canvas>
             </div>
-            <div class="chart">
+            <div class="chart-container">
                 <canvas id="qValueChart"></canvas>
             </div>
-            <div class="chart">
+            <div class="chart-container">
                 <canvas id="lifetimeChart"></canvas>
             </div>
         </div>
+        <div id="error" class="hidden error"></div>
     </div>
 
     <script>
@@ -77,42 +96,90 @@
             canvas: (function () {
                 var canvas = document.getElementById('game-canvas');
                 canvas.addEventListener('webglcontextlost', function (e) {
-                    alert('WebGL context lost. Please reload the page.');
+                    showError('WebGL context lost. Please reload the page.');
                     e.preventDefault();
                 }, false);
                 return canvas;
             })(),
 
             onRuntimeInitialized: function () {
-                // Hide loading indicator
-                var loadingElement = document.getElementById('loading');
-                if (loadingElement) loadingElement.classList.add('hidden');
-
-                // Show game elements
-                var statusElement = document.getElementById('status');
-                var canvasElement = document.getElementById('game-canvas');
-                var chartContainer = document.getElementById('chart-container');
-
-                if (statusElement) {
-                    statusElement.classList.remove('hidden');
-                    statusElement.textContent = 'Game loaded - training started';
-                }
-
-                if (canvasElement) {
-                    canvasElement.classList.remove('hidden');
-                }
-
-                if (chartContainer) {
-                    chartContainer.classList.remove('hidden');
-                }
+                console.log('WASM initialized');
+                document.getElementById('status').textContent = 'Game loaded - training started';
+                document.getElementById('game-canvas').classList.remove('hidden');
+                document.getElementById('chart-container').classList.remove('hidden');
+                
+                // Initialize charts after a short delay
+                setTimeout(function() {
+                    initializeCharts();
+                }, 500);
             },
 
             printErr: function (text) {
                 console.error(text);
-                var statusElement = document.getElementById('status');
-                if (statusElement) statusElement.textContent = 'Error: ' + text;
+                showError(text);
             }
         };
+
+        function showError(message) {
+            var errorElement = document.getElementById('error');
+            errorElement.textContent = 'Error: ' + message;
+            errorElement.classList.remove('hidden');
+        }
+
+        function initializeCharts() {
+            try {
+                var container = document.getElementById('chart-container');
+                
+                window.scoreChart = new Chart(document.getElementById('scoreChart'), {
+                    type: 'line',
+                    data: { labels: [], datasets: [{
+                        label: 'Episode Score',
+                        data: [],
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1,
+                        fill: false
+                    }]},
+                    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+                });
+
+                window.qValueChart = new Chart(document.getElementById('qValueChart'), {
+                    type: 'line',
+                    data: { labels: [], datasets: [{
+                        label: 'Average Q Value',
+                        data: [],
+                        borderColor: 'rgba(153, 102, 255, 1)',
+                        borderWidth: 1,
+                        fill: false
+                    }]},
+                    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+                });
+
+                window.lifetimeChart = new Chart(document.getElementById('lifetimeChart'), {
+                    type: 'line',
+                    data: { labels: [], datasets: [{
+                        label: 'Lifetime Score',
+                        data: [],
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1,
+                        fill: false
+                    }]},
+                    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+                });
+            } catch(e) {
+                showError('Failed to initialize charts: ' + e.message);
+            }
+        }
+
+        // Handle beforeunload safely
+        window.addEventListener('beforeunload', function(e) {
+            if (Module['_beforeUnloadHandler']) {
+                var result = Module['_beforeUnloadHandler']();
+                if (result) {
+                    e.preventDefault();
+                    e.returnValue = result;
+                }
+            }
+        });
     </script>
 
     {{{ SCRIPT }}}
