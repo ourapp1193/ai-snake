@@ -387,7 +387,7 @@ void updateQTable(int old_state, int action, int new_state, float reward) {
         new_state < 0 || new_state >= q_learning.table.size() ||
         action < 0 || action >= 4) {
         return; // Skip invalid updates
-    }
+    
         
         float max_future = 0.0f;
         if (!q_learning.table[new_state].empty()) {
