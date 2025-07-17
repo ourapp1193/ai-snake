@@ -190,6 +190,14 @@ extern "C" {
     float getExplorationRate() {
         return q_learning.exploration_rate;
     }
+
+    EMSCRIPTEN_KEEPALIVE
+    void cleanupBeforeUnload() {
+        // Cleanup resources before page unload
+        SDL_DestroyRenderer(sdl.renderer);
+        SDL_DestroyWindow(sdl.window);
+        SDL_Quit();
+    }
 }
 
 vector<vector<int>> generateAllPositions() {
@@ -249,7 +257,7 @@ bool willCauseTrap(int x, int y, int dir) {
         return true;
     }
     
-    // More advanced trap detection - simulate future moves
+    // More advanced trap detection
     vector<vector<bool>> visited(HEIGHT, vector<bool>(WIDTH, false));
     queue<pair<int, int>> q;
     q.push({new_x, new_y});
@@ -273,9 +281,8 @@ bool willCauseTrap(int x, int y, int dir) {
         }
     }
     
-    // If reachable area is too small compared to free space
     int free_space = WIDTH * HEIGHT - game.length;
-    return reachable < free_space * 0.3;  // If we can only reach less than 30% of free space
+    return reachable < free_space * 0.3;
 }
 
 vector<int> findSafeDirections(int x, int y) {
@@ -307,17 +314,18 @@ vector<int> findSafeDirections(int x, int y) {
 }
 
 void initQTable() {
-    // More compact state representation
-    q_learning.table.resize(WIDTH * HEIGHT * 16);  // Reduced state space
+    // Initialize Q-table with safe size
+    const int STATE_SPACE_SIZE = WIDTH * HEIGHT * 16;
+    q_learning.table.resize(STATE_SPACE_SIZE);
     for (auto& row : q_learning.table) {
         row.assign(4, 0.0f);
     }
 }
 
-int getStateIndex(int x, int y, int dir) {
+int getSafeStateIndex(int x, int y, int dir) {
     if (!isPositionValid(x, y)) return 0;
     
-    // Ensure x and y are within bounds
+    // Clamp positions to valid range
     x = max(0, min(HEIGHT-1, x));
     y = max(0, min(WIDTH-1, y));
     
@@ -351,11 +359,11 @@ int chooseAction(int x, int y, int current_dir) {
     }
 
     // Exploitation phase
-    int state = getStateIndex(x, y, current_dir);
+    int state = getSafeStateIndex(x, y, current_dir);
     if (state >= 0 && state < q_learning.table.size()) {
         vector<int> safe_directions = findSafeDirections(x, y);
         if (safe_directions.empty()) {
-            safe_directions = {current_dir};  // Default to current direction if no safe options
+            safe_directions = {current_dir};  // Default to current direction
         }
         
         // Find the best action among safe directions
@@ -383,7 +391,8 @@ int chooseAction(int x, int y, int current_dir) {
 
 void updateQTable(int old_state, int action, int new_state, float reward) {
     if (old_state >= 0 && old_state < q_learning.table.size() && 
-        new_state >= 0 && new_state < q_learning.table.size()) {
+        new_state >= 0 && new_state < q_learning.table.size() &&
+        action >= 0 && action < 4) {
         float best_future = *max_element(q_learning.table[new_state].begin(), 
                                        q_learning.table[new_state].end());
         q_learning.table[old_state][action] = 
@@ -482,8 +491,8 @@ bool moveSnake(int& direction) {
         bool crashed = !valid;
 
         float reward = calculateReward(prev_x, prev_y, new_x, new_y, got_food, crashed);
-        int old_state = getStateIndex(prev_x, prev_y, prev_dir);
-        int new_state = getStateIndex(new_x, new_y, action);
+        int old_state = getSafeStateIndex(prev_x, prev_y, prev_dir);
+        int new_state = getSafeStateIndex(new_x, new_y, action);
         updateQTable(old_state, action, new_state, reward);
 
         if (valid) {
@@ -687,6 +696,10 @@ int main() {
     #ifdef __EMSCRIPTEN__
     export_functions();
     initChartJS();
+    emscripten_set_beforeunload_callback(nullptr, []() -> const char* {
+        cleanupBeforeUnload();
+        return "Are you sure you want to leave?";
+    });
     #endif
 
     auto all_positions = generateAllPositions();
