@@ -691,10 +691,7 @@ int main() {
     #ifdef __EMSCRIPTEN__
     export_functions();
     initChartJS();
-    
-    // Register event handlers
     emscripten_set_beforeunload_callback(nullptr, beforeUnloadHandler);
-    emscripten_set_visibilitychange_callback(nullptr, 1, visibilityChangeHandler);
     #endif
 
     auto all_positions = generateAllPositions();
