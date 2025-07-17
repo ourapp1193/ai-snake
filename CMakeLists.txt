@@ -25,7 +25,8 @@ if(EMSCRIPTEN)
         "${CMAKE_EXE_LINKER_FLAGS} -sSAFE_HEAP=1")
         
     # Compiler flags
-    add_compile_options(-O3 -sASSERTIONS=1 -sDEMANGLE_SUPPORT=1)
+    add_compile_options(-O3 -sASSERTIONS=1 -sDEMANGLE_SUPPORT=1 -Werror=undefined)
+    add_link_options(-Werror=undefined)
 else()
     find_package(SDL2 REQUIRED)
     add_compile_options(-O3)
