@@ -12,7 +12,7 @@ if(EMSCRIPTEN)
         -sUSE_WEBGL2=1 \
         -sALLOW_MEMORY_GROWTH=1 \
         -sASSERTIONS=1 \
-        -sINITIAL_MEMORY=64MB \
+        -sINITIAL_MEMORY=128MB \
         --shell-file ${CMAKE_SOURCE_DIR}/shell.html \
         -sEXPORTED_FUNCTIONS=['_main','_getExplorationRate','_malloc','_free'] \
         -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString'] \
