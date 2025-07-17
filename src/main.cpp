@@ -24,6 +24,7 @@ const int CELL_SIZE = 20;
 const int AI_UPDATE_INTERVAL = 5;
 const int LOG_INTERVAL = 100;
 const int MAX_TRAINING_EPISODES = 5000000;
+const int MAX_STEPS_WITHOUT_FOOD = 200;
 
 // Game state
 struct GameState {
@@ -48,6 +49,7 @@ struct QLearning {
     float exploration_rate = 1.0f;
     int episodes = 0;
     const float exploration_decay = 0.9999f;
+    const float min_exploration = 0.001f;
 };
 
 // Performance tracking
@@ -72,7 +74,10 @@ SDLResources sdl;
 
 // Forward declarations
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed);
-vector<int> findSafeDirections(int x, int y, int current_dir);
+vector<int> findSafeDirections(int x, int y);
+bool isPositionSafe(int x, int y);
+bool willCauseTrap(int x, int y, int dir);
+bool isPositionValid(int x, int y);
 
 // Function to get dynamic minimum exploration
 float getMinExploration() {
@@ -206,7 +211,7 @@ vector<vector<int>> getFreePositions(const vector<vector<int>>& occupied, const 
     return free;
 }
 
-bool isValidPosition(int x, int y) {
+bool isPositionValid(int x, int y) {
     return x >= 0 && x < HEIGHT && y >= 0 && y < WIDTH;
 }
 
@@ -220,32 +225,60 @@ bool isBodyPosition(int x, int y, bool include_head = true) {
     return false;
 }
 
-void initQTable() {
-    q_learning.table.resize(WIDTH * HEIGHT * 128);
-    for (auto& row : q_learning.table) {
-        row.assign(4, 0.0f);
+bool isPositionSafe(int x, int y) {
+    return isPositionValid(x, y) && !isBodyPosition(x, y, false);
+}
+
+bool willCauseTrap(int x, int y, int dir) {
+    // Simulate the move
+    int new_x = x, new_y = y;
+    switch (dir) {
+        case 0: new_x--; break;
+        case 1: new_x++; break;
+        case 2: new_y--; break;
+        case 3: new_y++; break;
     }
+    
+    if (!isPositionSafe(new_x, new_y)) {
+        return true;
+    }
+    
+    // Check if this move will lead to a dead end
+    vector<int> safe_dirs = findSafeDirections(new_x, new_y);
+    if (safe_dirs.empty()) {
+        return true;
+    }
+    
+    // More advanced trap detection - simulate future moves
+    vector<vector<bool>> visited(HEIGHT, vector<bool>(WIDTH, false));
+    queue<pair<int, int>> q;
+    q.push({new_x, new_y});
+    visited[new_x][new_y] = true;
+    int reachable = 0;
+    
+    while (!q.empty()) {
+        auto current = q.front();
+        q.pop();
+        reachable++;
+        
+        int directions[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+        for (int i = 0; i < 4; i++) {
+            int nx = current.first + directions[i][0];
+            int ny = current.second + directions[i][1];
+            
+            if (isPositionSafe(nx, ny) && !visited[nx][ny]) {
+                visited[nx][ny] = true;
+                q.push({nx, ny});
+            }
+        }
+    }
+    
+    // If reachable area is too small compared to free space
+    int free_space = WIDTH * HEIGHT - game.length;
+    return reachable < free_space * 0.3;  // If we can only reach less than 30% of free space
 }
 
-int getStateIndex(int x, int y, int dir) {
-    if (!isValidPosition(x, y)) return 0;
-    
-    int food_dir = 0;
-    if (game.food_x > x) food_dir = 1;
-    else if (game.food_x < x) food_dir = 2;
-    if (game.food_y > y) food_dir |= 4;
-    else if (game.food_y < y) food_dir |= 8;
-    
-    int danger = 0;
-    if (!isValidPosition(x-1, y) || isBodyPosition(x-1, y, false)) danger |= 1;
-    if (!isValidPosition(x+1, y) || isBodyPosition(x+1, y, false)) danger |= 2;
-    if (!isValidPosition(x, y-1) || isBodyPosition(x, y-1, false)) danger |= 4;
-    if (!isValidPosition(x, y+1) || isBodyPosition(x, y+1, false)) danger |= 8;
-    
-    return (y * WIDTH + x) * 128 + dir * 32 + food_dir * 4 + danger;
-}
-
-vector<int> findSafeDirections(int x, int y, int current_dir) {
+vector<int> findSafeDirections(int x, int y) {
     vector<int> safe_directions;
     vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     
@@ -253,7 +286,7 @@ vector<int> findSafeDirections(int x, int y, int current_dir) {
         int new_x = x + directions[i].first;
         int new_y = y + directions[i].second;
         
-        if (isValidPosition(new_x, new_y) && !isBodyPosition(new_x, new_y, false)) {
+        if (isPositionSafe(new_x, new_y) && !willCauseTrap(x, y, i)) {
             safe_directions.push_back(i);
         }
     }
@@ -264,35 +297,62 @@ vector<int> findSafeDirections(int x, int y, int current_dir) {
             int new_x = x + directions[i].first;
             int new_y = y + directions[i].second;
             
-            if (isValidPosition(new_x, new_y)) {
+            if (isPositionValid(new_x, new_y)) {
                 safe_directions.push_back(i);
             }
         }
     }
     
-    // If still no directions, just return current direction
-    if (safe_directions.empty()) {
-        safe_directions.push_back(current_dir);
-    }
-    
     return safe_directions;
 }
 
+void initQTable() {
+    // More compact state representation
+    q_learning.table.resize(WIDTH * HEIGHT * 16);  // Reduced state space
+    for (auto& row : q_learning.table) {
+        row.assign(4, 0.0f);
+    }
+}
+
+int getStateIndex(int x, int y, int dir) {
+    if (!isPositionValid(x, y)) return 0;
+    
+    // Simplified state representation
+    int food_dir = 0;
+    if (game.food_x > x) food_dir = 1;
+    else if (game.food_x < x) food_dir = 2;
+    if (game.food_y > y) food_dir |= 4;
+    else if (game.food_y < y) food_dir |= 8;
+    
+    // Immediate danger detection
+    int danger = 0;
+    if (!isPositionSafe(x-1, y)) danger |= 1;
+    if (!isPositionSafe(x+1, y)) danger |= 2;
+    if (!isPositionSafe(x, y-1)) danger |= 4;
+    if (!isPositionSafe(x, y+1)) danger |= 8;
+    
+    return (y * WIDTH + x) * 16 + food_dir * 4 + danger;
+}
+
 int chooseAction(int x, int y, int current_dir) {
+    // Exploration phase
     if (static_cast<float>(rand()) / RAND_MAX < q_learning.exploration_rate) {
-        vector<int> safe_directions = findSafeDirections(x, y, current_dir);
+        vector<int> safe_directions = findSafeDirections(x, y);
         if (!safe_directions.empty()) {
             return safe_directions[rand() % safe_directions.size()];
         }
         return rand() % 4;
     }
 
+    // Exploitation phase
     int state = getStateIndex(x, y, current_dir);
     if (state >= 0 && state < q_learning.table.size()) {
-        // Only consider safe directions when exploiting
-        vector<int> safe_directions = findSafeDirections(x, y, current_dir);
-        if (safe_directions.empty()) return current_dir;
+        vector<int> safe_directions = findSafeDirections(x, y);
+        if (safe_directions.empty()) {
+            safe_directions = {current_dir};  // Default to current direction if no safe options
+        }
         
+        // Find the best action among safe directions
         int best_action = safe_directions[0];
         float best_value = q_learning.table[state][best_action];
         
@@ -307,7 +367,8 @@ int chooseAction(int x, int y, int current_dir) {
         return best_action;
     }
     
-    vector<int> safe_directions = findSafeDirections(x, y, current_dir);
+    // Fallback
+    vector<int> safe_directions = findSafeDirections(x, y);
     if (!safe_directions.empty()) {
         return safe_directions[rand() % safe_directions.size()];
     }
@@ -329,32 +390,26 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     if (crashed) return -100.0f;
     if (got_food) return 50.0f;
     
+    // Distance to food reward
     float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
     float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
+    float distance_reward = (prev_dist - new_dist) * 5.0f;
     
-    // Add penalty for being near body segments
-    float body_penalty = 0.0f;
-    for (int dx = -1; dx <= 1; dx++) {
-        for (int dy = -1; dy <= 1; dy++) {
-            if (dx == 0 && dy == 0) continue;
-            if (isBodyPosition(x + dx, y + dy, false)) {
-                body_penalty -= 10.0f;
-            }
-        }
+    // Danger penalty
+    float danger_penalty = 0.0f;
+    if (!isPositionSafe(x-1, y)) danger_penalty -= 5.0f;
+    if (!isPositionSafe(x+1, y)) danger_penalty -= 5.0f;
+    if (!isPositionSafe(x, y-1)) danger_penalty -= 5.0f;
+    if (!isPositionSafe(x, y+1)) danger_penalty -= 5.0f;
+    
+    // Trap detection penalty
+    float trap_penalty = 0.0f;
+    vector<int> safe_dirs = findSafeDirections(x, y);
+    if (safe_dirs.size() <= 1) {
+        trap_penalty -= 10.0f * (2 - safe_dirs.size());
     }
     
-    // Add penalty for moving in circles
-    float circle_penalty = 0.0f;
-    if (game.trail.size() > 10) {
-        for (size_t i = 0; i < game.trail.size() - 1; i++) {
-            if (game.trail[i][0] == x && game.trail[i][1] == y) {
-                circle_penalty -= 5.0f * (game.trail.size() - i);
-                break;
-            }
-        }
-    }
-    
-    // Add reward for exploring new areas
+    // Exploration reward
     float exploration_reward = 0.0f;
     bool new_position = true;
     for (const auto& pos : game.trail) {
@@ -365,7 +420,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     }
     if (new_position) exploration_reward += 2.0f;
     
-    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + exploration_reward;
+    return distance_reward + danger_penalty + trap_penalty + exploration_reward;
 }
 
 void resetGame() {
@@ -416,7 +471,7 @@ bool moveSnake(int& direction) {
             case 3: new_y++; break;
         }
 
-        bool valid = isValidPosition(new_x, new_y) && !isBodyPosition(new_x, new_y, false);
+        bool valid = isPositionSafe(new_x, new_y);
         bool got_food = (new_x == game.food_x && new_y == game.food_y);
         bool crashed = !valid;
 
@@ -428,7 +483,7 @@ bool moveSnake(int& direction) {
         if (valid) {
             direction = action;
         } else {
-            vector<int> safe_actions = findSafeDirections(prev_x, prev_y, prev_dir);
+            vector<int> safe_actions = findSafeDirections(prev_x, prev_y);
             if (!safe_actions.empty()) {
                 direction = safe_actions[rand() % safe_actions.size()];
             } else {
@@ -437,6 +492,7 @@ bool moveSnake(int& direction) {
         }
     }
 
+    // Execute the move
     switch (direction) {
         case 0: game.head_x--; break;
         case 1: game.head_x++; break;
@@ -446,10 +502,12 @@ bool moveSnake(int& direction) {
 
     game.steps_since_last_food++;
 
-    if (!isValidPosition(game.head_x, game.head_y) || isBodyPosition(game.head_x, game.head_y, false)) {
+    // Check for collisions
+    if (!isPositionSafe(game.head_x, game.head_y)) {
         return true;
     }
 
+    // Update trail and body
     game.trail.insert(game.trail.begin(), {game.head_x, game.head_y});
     if (game.trail.size() > game.length + 2) {
         game.trail.resize(game.length + 2);
@@ -460,6 +518,7 @@ bool moveSnake(int& direction) {
         game.body.resize(game.length);
     }
 
+    // Check for food
     if (game.head_x == game.food_x && game.head_y == game.food_y) {
         game.score++;
         game.lifetime_score++;
@@ -468,7 +527,8 @@ bool moveSnake(int& direction) {
         spawnFood();
     }
 
-    if (game.steps_since_last_food > 200) {
+    // Check for starvation
+    if (game.steps_since_last_food > MAX_STEPS_WITHOUT_FOOD) {
         return true;
     }
 
@@ -506,28 +566,45 @@ void initSDL() {
     if (SDL_SetRenderDrawBlendMode(sdl.renderer, SDL_BLENDMODE_BLEND) != 0) {
         cerr << "SDL_SetRenderDrawBlendMode Error: " << SDL_GetError() << endl;
     }
+
+    #ifdef __EMSCRIPTEN__
+    EM_ASM({
+        Module.canvas.width = 400;
+        Module.canvas.height = 400;
+        Module.canvas.style.width = '400px';
+        Module.canvas.style.height = '400px';
+    });
+    #endif
 }
 
 void drawGame() {
+    // Clear screen with black
     SDL_SetRenderDrawColor(sdl.renderer, 0, 0, 0, 255);
     SDL_RenderClear(sdl.renderer);
 
-    SDL_SetRenderDrawColor(sdl.renderer, 50, 50, 50, 255);
-    SDL_Rect border = {0, 0, WIDTH * CELL_SIZE, HEIGHT * CELL_SIZE};
-    SDL_RenderDrawRect(sdl.renderer, &border);
+    // Draw grid
+    SDL_SetRenderDrawColor(sdl.renderer, 30, 30, 30, 255);
+    for (int x = 0; x < WIDTH; x++) {
+        SDL_RenderDrawLine(sdl.renderer, x * CELL_SIZE, 0, x * CELL_SIZE, HEIGHT * CELL_SIZE);
+    }
+    for (int y = 0; y < HEIGHT; y++) {
+        SDL_RenderDrawLine(sdl.renderer, 0, y * CELL_SIZE, WIDTH * CELL_SIZE, y * CELL_SIZE);
+    }
 
+    // Draw food
     SDL_SetRenderDrawColor(sdl.renderer, 255, 0, 0, 255);
     SDL_Rect food = {game.food_y * CELL_SIZE, game.food_x * CELL_SIZE, CELL_SIZE, CELL_SIZE};
     SDL_RenderFillRect(sdl.renderer, &food);
 
+    // Draw snake body
     for (size_t i = 0; i < game.body.size(); i++) {
         const auto& seg = game.body[i];
         if (seg.size() == 2) {
             if (i == 0) {
-                SDL_SetRenderDrawColor(sdl.renderer, 0, 255, 0, 255);
+                SDL_SetRenderDrawColor(sdl.renderer, 0, 255, 0, 255); // Head
             } else {
                 int intensity = 100 + (155 * i / game.body.size());
-                SDL_SetRenderDrawColor(sdl.renderer, 0, intensity, 0, 255);
+                SDL_SetRenderDrawColor(sdl.renderer, 0, intensity, 0, 255); // Body
             }
             SDL_Rect body = {seg[1] * CELL_SIZE, seg[0] * CELL_SIZE, CELL_SIZE, CELL_SIZE};
             SDL_RenderFillRect(sdl.renderer, &body);
