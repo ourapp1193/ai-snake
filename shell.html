@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{{ TITLE }}}</title>
+    <title>AI Snake Game</title>
     <style>
         html, body {
             margin: 0;
@@ -42,6 +42,15 @@
             transform: translate(-50%, -50%);
             font-size: 24px;
         }
+        #debug {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 80%;
+        }
         .hidden {
             display: none;
         }
@@ -54,51 +63,71 @@
         <div id="status">Initializing AI Snake...</div>
         <canvas id="canvas"></canvas>
     </div>
+    <div id="debug"></div>
 
     <script>
-        // Configure the WASM module
+        function debugLog(message) {
+            const debugDiv = document.getElementById('debug');
+            debugDiv.innerHTML += message + '<br>';
+            console.log(message);
+        }
+
+        debugLog('Starting game initialization...');
+
         var Module = {
             canvas: (function() {
                 var canvas = document.getElementById('canvas');
+                canvas.width = 20 * 20;  // WIDTH * CELL_SIZE
+                canvas.height = 20 * 20; // HEIGHT * CELL_SIZE
+                
                 canvas.addEventListener('webglcontextlost', function(e) {
+                    debugLog('WebGL context lost!');
                     alert('WebGL context lost. Please reload the page.');
                     e.preventDefault();
                 }, false);
                 return canvas;
             })(),
 
-            onRuntimeInitialized: function() {
-                document.getElementById('loading').classList.add('hidden');
-                document.getElementById('container').classList.remove('hidden');
-                
-                // Set canvas size based on game dimensions
-                var canvas = document.getElementById('canvas');
-                canvas.width = 20 * 20;  // WIDTH * CELL_SIZE
-                canvas.height = 20 * 20; // HEIGHT * CELL_SIZE
-                
-                // Start the game
-                setTimeout(function() {
-                    try {
-                        Module._main();
-                    } catch(e) {
-                        console.error("Error starting game:", e);
-                        document.getElementById('status').textContent = 'Error: ' + e.message;
-                    }
-                }, 100);
+            print: function(text) {
+                debugLog('stdout: ' + text);
+            },
+
+            printErr: function(text) {
+                debugLog('stderr: ' + text);
+                this.setStatus('Error: ' + text);
             },
 
             setStatus: function(text) {
+                debugLog('Status: ' + text);
                 var statusElement = document.getElementById('status');
                 if (statusElement) {
                     statusElement.textContent = text;
                 }
             },
 
-            printErr: function(text) {
-                console.error(text);
-                this.setStatus('Error: ' + text);
+            onRuntimeInitialized: function() {
+                debugLog('Runtime initialized!');
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('container').classList.remove('hidden');
+                
+                try {
+                    debugLog('Calling _main()...');
+                    Module._main();
+                    debugLog('_main() called successfully');
+                } catch(e) {
+                    debugLog('Error in _main(): ' + e);
+                    console.error(e);
+                    this.setStatus('Error: ' + e.message);
+                }
+            },
+
+            onAbort: function(reason) {
+                debugLog('Aborted: ' + reason);
+                this.setStatus('Aborted: ' + reason);
             }
         };
+
+        debugLog('Module configuration complete');
     </script>
 </body>
 </html>
