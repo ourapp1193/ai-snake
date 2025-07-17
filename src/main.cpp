@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <queue>
 #include <cmath>
-#include <SDL2/SDL.h>
+#include <SDL/SDL.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/html5.h>
