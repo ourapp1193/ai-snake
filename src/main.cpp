@@ -1,804 +1,316 @@
-#include <iostream>
-#include <vector>
-#include <cstdlib>
-#include <ctime>
-#include <algorithm>
-#include <queue>
-#include <cmath>
-#include <SDL/SDL.h>
-#ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-#include <emscripten/html5.h>
+#include <emscripten/bind.h>
+#include <vector>
+#include <algorithm>
+#include <random>
+#include <cmath>
+#include <numeric>
+#include <iostream>
+#include <string>
+#include <chrono>
+#include <unordered_map>
 
-EM_JS(void, export_functions, (), {
-    Module['getExplorationRate'] = Module.cwrap('getExplorationRate', 'number', []);
-});
-#endif
+using namespace emscripten;
 
-using namespace std;
-
-// Game constants
-const int WIDTH = 20;
-const int HEIGHT = 20;
+// Constants
+const int GRID_SIZE = 20;
 const int CELL_SIZE = 20;
-const int AI_UPDATE_INTERVAL = 5;
-const int LOG_INTERVAL = 100;
-const int MAX_TRAINING_EPISODES = 5000000;
-const int MAX_STEPS_WITHOUT_FOOD = 200;
+const int INITIAL_SPEED = 150;
+const double INITIAL_EXPLORATION = 1.0;
+const double MIN_EXPLORATION = 0.01;
+const double EXPLORATION_DECAY = 0.995;
+const double LEARNING_RATE = 0.1;
+const double DISCOUNT_FACTOR = 0.9;
 
 // Game state
 struct GameState {
-    int head_x = HEIGHT / 2;
-    int head_y = WIDTH / 2;
     int score = 0;
-    int length = 2;
-    int food_x = 0, food_y = 0;
-    bool crashed = false;
-    int speed = 10;
-    vector<vector<int>> body;
-    vector<vector<int>> trail;
     int lifetime_score = 0;
-    int steps_since_last_food = 0;
-    bool initialized = false;
+    bool game_over = false;
+    std::vector<std::pair<int, int>> snake;
+    std::pair<int, int> food;
+    std::pair<int, int> direction = {1, 0};
+    int speed = INITIAL_SPEED;
 };
 
-// Q-learning parameters
-struct QLearning {
-    vector<vector<float>> table;
-    float learning_rate = 0.1f;
-    float discount_factor = 0.95f;
-    float exploration_rate = 1.0f;
+// Q-learning agent
+struct QLearningAgent {
+    std::unordered_map<std::string, std::vector<double>> q_table;
+    double exploration_rate = INITIAL_EXPLORATION;
     int episodes = 0;
-    const float exploration_decay = 0.9999f;
-    const float min_exploration = 0.001f;
-    bool initialized = false;
-};
-
-// Performance tracking
-struct Performance {
-    vector<int> scores;
-    vector<float> avg_q_values;
-    vector<int> lengths;
-    vector<float> avg_rewards;
-};
-
-// SDL resources
-struct SDLResources {
-    SDL_Window* window = nullptr;
-    SDL_Renderer* renderer = nullptr;
-    bool initialized = false;
-};
-
-// Global game objects
-GameState game;
-QLearning q_learning;
-Performance performance;
-SDLResources sdl;
-
-// Forward declarations
-float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed);
-vector<int> findSafeDirections(int x, int y);
-bool isPositionSafe(int x, int y);
-bool willCauseTrap(int x, int y, int dir);
-bool isPositionValid(int x, int y);
-void cleanupBeforeUnload();
-void initializeGame();
-
-vector<vector<int>> generateAllPositions() {
-    vector<vector<int>> positions(WIDTH * HEIGHT, vector<int>(2));
-    int idx = 0;
-    for (int i = 0; i < HEIGHT; ++i) {
-        for (int j = 0; j < WIDTH; ++j, ++idx) {
-            positions[idx] = {i, j};
-        }
+    
+    std::string get_state_key(const GameState& state) {
+        std::string key;
+        
+        // Snake head position
+        key += std::to_string(state.snake.front().first) + ",";
+        key += std::to_string(state.snake.front().second) + ",";
+        
+        // Food position relative to head
+        key += std::to_string(state.food.first - state.snake.front().first) + ",";
+        key += std::to_string(state.food.second - state.snake.front().second) + ",";
+        
+        // Danger directions
+        key += std::to_string(is_danger(state, {1, 0})) + ",";  // Right
+        key += std::to_string(is_danger(state, {-1, 0})) + ","; // Left
+        key += std::to_string(is_danger(state, {0, 1})) + ",";  // Down
+        key += std::to_string(is_danger(state, {0, -1}));       // Up
+        
+        return key;
     }
-    return positions;
-}
-
-vector<vector<int>> getFreePositions(const vector<vector<int>>& occupied, const vector<vector<int>>& all) {
-    vector<vector<int>> free = all;
-    for (const auto& pos : occupied) {
-        free.erase(remove(free.begin(), free.end(), pos), free.end());
-    }
-    return free;
-}
-
-bool isPositionValid(int x, int y) {
-    return x >= 0 && x < HEIGHT && y >= 0 && y < WIDTH;
-}
-
-bool isBodyPosition(int x, int y, bool include_head = true) {
-    for (size_t i = include_head ? 0 : 1; i < game.body.size(); ++i) {
-        const auto& seg = game.body[i];
-        if (seg.size() == 2 && seg[0] == x && seg[1] == y) {
+    
+    bool is_danger(const GameState& state, const std::pair<int, int>& dir) {
+        auto new_head = state.snake.front();
+        new_head.first += dir.first;
+        new_head.second += dir.second;
+        
+        // Check wall collision
+        if (new_head.first < 0 || new_head.first >= GRID_SIZE ||
+            new_head.second < 0 || new_head.second >= GRID_SIZE) {
             return true;
         }
-    }
-    return false;
-}
-
-bool isPositionSafe(int x, int y) {
-    return isPositionValid(x, y) && !isBodyPosition(x, y, false);
-}
-
-bool willCauseTrap(int x, int y, int dir) {
-    if (!game.initialized) return false;
-    
-    int new_x = x, new_y = y;
-    switch (dir) {
-        case 0: new_x--; break;
-        case 1: new_x++; break;
-        case 2: new_y--; break;
-        case 3: new_y++; break;
-    }
-    
-    if (!isPositionSafe(new_x, new_y)) {
-        return true;
-    }
-    
-    vector<int> safe_dirs = findSafeDirections(new_x, new_y);
-    if (safe_dirs.empty()) {
-        return true;
-    }
-    
-    vector<vector<bool>> visited(HEIGHT, vector<bool>(WIDTH, false));
-    queue<pair<int, int>> q;
-    q.push({new_x, new_y});
-    visited[new_x][new_y] = true;
-    int reachable = 0;
-    
-    while (!q.empty()) {
-        auto current = q.front();
-        q.pop();
-        reachable++;
         
-        int directions[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-        for (int i = 0; i < 4; i++) {
-            int nx = current.first + directions[i][0];
-            int ny = current.second + directions[i][1];
-            
-            if (isPositionSafe(nx, ny) && !visited[nx][ny]) {
-                visited[nx][ny] = true;
-                q.push({nx, ny});
-            }
-        }
-    }
-    
-    int free_space = WIDTH * HEIGHT - game.length;
-    return reachable < free_space * 0.3;
-}
-
-vector<int> findSafeDirections(int x, int y) {
-    if (!game.initialized) return {0, 1, 2, 3};
-    
-    vector<int> safe_directions;
-    vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-    
-    for (int i = 0; i < 4; i++) {
-        int new_x = x + directions[i].first;
-        int new_y = y + directions[i].second;
-        
-        if (isPositionSafe(new_x, new_y) && !willCauseTrap(x, y, i)) {
-            safe_directions.push_back(i);
-        }
-    }
-    
-    if (safe_directions.empty()) {
-        for (int i = 0; i < 4; i++) {
-            int new_x = x + directions[i].first;
-            int new_y = y + directions[i].second;
-            
-            if (isPositionValid(new_x, new_y)) {
-                safe_directions.push_back(i);
-            }
-        }
-    }
-    
-    return safe_directions;
-}
-
-void initQTable() {
-    const int STATE_SPACE_SIZE = WIDTH * HEIGHT * 16;
-    q_learning.table.resize(STATE_SPACE_SIZE, vector<float>(4, 0.0f));
-    q_learning.initialized = true;
-}
-
-int getSafeStateIndex(int x, int y, int dir) {
-    if (!q_learning.initialized || !game.initialized) return 0;
-    
-    if (!isPositionValid(x, y)) return 0;
-    
-    x = max(0, min(HEIGHT-1, x));
-    y = max(0, min(WIDTH-1, y));
-    
-    int food_dir = 0;
-    if (game.food_x > x) food_dir = 1;
-    else if (game.food_x < x) food_dir = 2;
-    if (game.food_y > y) food_dir |= 4;
-    else if (game.food_y < y) food_dir |= 8;
-    
-    int danger = 0;
-    if (!isPositionSafe(x-1, y)) danger |= 1;
-    if (!isPositionSafe(x+1, y)) danger |= 2;
-    if (!isPositionSafe(x, y-1)) danger |= 4;
-    if (!isPositionSafe(x, y+1)) danger |= 8;
-    
-    int index = (y * WIDTH + x) * 16 + food_dir * 4 + danger;
-    return max(0, min((int)q_learning.table.size() - 1, index));
-}
-
-bool shouldExplore() {
-    if (!q_learning.initialized) return true;
-    
-    float random = static_cast<float>(rand()) / (static_cast<float>(RAND_MAX) + 1.0f);
-    return random < q_learning.exploration_rate;
-}
-
-int chooseAction(int x, int y, int current_dir) {
-    if (!game.initialized || !q_learning.initialized) return rand() % 4;
-    
-    vector<int> safe_directions = findSafeDirections(x, y);
-    
-    if (shouldExplore()) {
-        if (!safe_directions.empty()) {
-            return safe_directions[rand() % safe_directions.size()];
-        }
-        return rand() % 4;
-    }
-
-    int state = getSafeStateIndex(x, y, current_dir);
-    if (state >= 0 && state < q_learning.table.size()) {
-        if (safe_directions.empty()) {
-            safe_directions = {current_dir};
-        }
-        
-        int best_action = safe_directions[0];
-        float best_value = q_learning.table[state][best_action];
-        
-        for (size_t i = 1; i < safe_directions.size(); i++) {
-            int action = safe_directions[i];
-            if (action >= 0 && action < 4 && 
-                q_learning.table[state][action] > best_value) {
-                best_value = q_learning.table[state][action];
-                best_action = action;
-            }
-        }
-        return best_action;
-    }
-    
-    if (!safe_directions.empty()) {
-        return safe_directions[rand() % safe_directions.size()];
-    }
-    return current_dir;
-}
-
-void updateQTable(int old_state, int action, int new_state, float reward) {
-    if (!q_learning.initialized) return;
-    
-    if (old_state < 0 || old_state >= q_learning.table.size() ||
-        new_state < 0 || new_state >= q_learning.table.size() ||
-        action < 0 || action >= 4) {
-        return;
-    }
-    
-    float max_future = 0.0f;
-    if (!q_learning.table[new_state].empty()) {
-        max_future = *max_element(q_learning.table[new_state].begin(),
-                                q_learning.table[new_state].end());
-    }
-    
-    q_learning.table[old_state][action] =
-        (1 - q_learning.learning_rate) * q_learning.table[old_state][action] +
-        q_learning.learning_rate * (reward + q_learning.discount_factor * max_future);
-}
-
-float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed) {
-    if (!game.initialized) return 0.0f;
-    
-    if (crashed) return -100.0f;
-    if (got_food) return 50.0f;
-    
-    float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
-    float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
-    float distance_reward = (prev_dist - new_dist) * 5.0f;
-    
-    float danger_penalty = 0.0f;
-    if (!isPositionSafe(x-1, y)) danger_penalty -= 5.0f;
-    if (!isPositionSafe(x+1, y)) danger_penalty -= 5.0f;
-    if (!isPositionSafe(x, y-1)) danger_penalty -= 5.0f;
-    if (!isPositionSafe(x, y+1)) danger_penalty -= 5.0f;
-    
-    float trap_penalty = 0.0f;
-    vector<int> safe_dirs = findSafeDirections(x, y);
-    if (safe_dirs.size() <= 1) {
-        trap_penalty -= 10.0f * (2 - safe_dirs.size());
-    }
-    
-    float exploration_reward = 0.0f;
-    bool new_position = true;
-    for (const auto& pos : game.trail) {
-        if (pos[0] == x && pos[1] == y) {
-            new_position = false;
-            break;
-        }
-    }
-    if (new_position) exploration_reward += 2.0f;
-    
-    return distance_reward + danger_penalty + trap_penalty + exploration_reward;
-}
-
-void resetGame() {
-    game.head_x = HEIGHT / 2;
-    game.head_y = WIDTH / 2;
-    game.length = 2;
-    game.score = 0;
-    game.steps_since_last_food = 0;
-    game.body = {{game.head_x, game.head_y}};
-    game.trail = {{game.head_x, game.head_y}};
-    game.crashed = false;
-    
-    auto all_positions = generateAllPositions();
-    auto free_positions = getFreePositions(game.trail, all_positions);
-    if (!free_positions.empty()) {
-        int k = rand() % free_positions.size();
-        game.food_x = free_positions[k][0];
-        game.food_y = free_positions[k][1];
-    }
-    
-    game.initialized = true;
-}
-
-void spawnFood() {
-    auto all_positions = generateAllPositions();
-    auto free_positions = getFreePositions(game.trail, all_positions);
-    if (!free_positions.empty()) {
-        int k = rand() % free_positions.size();
-        game.food_x = free_positions[k][0];
-        game.food_y = free_positions[k][1];
-    }
-}
-
-bool moveSnake(int& direction) {
-    static int frame = 0;
-    frame++;
-
-    int prev_x = game.head_x;
-    int prev_y = game.head_y;
-    int prev_dir = direction;
-
-    if (frame % AI_UPDATE_INTERVAL == 0 || q_learning.episodes < MAX_TRAINING_EPISODES) {
-        int action = chooseAction(game.head_x, game.head_y, direction);
-        
-        int new_x = game.head_x, new_y = game.head_y;
-        switch (action) {
-            case 0: new_x--; break;
-            case 1: new_x++; break;
-            case 2: new_y--; break;
-            case 3: new_y++; break;
-        }
-
-        bool valid = isPositionSafe(new_x, new_y);
-        bool got_food = (new_x == game.food_x && new_y == game.food_y);
-        bool crashed = !valid;
-
-        float reward = calculateReward(prev_x, prev_y, new_x, new_y, got_food, crashed);
-        int old_state = getSafeStateIndex(prev_x, prev_y, prev_dir);
-        int new_state = getSafeStateIndex(new_x, new_y, action);
-        updateQTable(old_state, action, new_state, reward);
-
-        if (valid) {
-            direction = action;
-        } else {
-            vector<int> safe_actions = findSafeDirections(prev_x, prev_y);
-            if (!safe_actions.empty()) {
-                direction = safe_actions[rand() % safe_actions.size()];
-            } else {
+        // Check self collision
+        for (size_t i = 0; i < state.snake.size(); i++) {
+            if (new_head == state.snake[i]) {
                 return true;
             }
         }
+        
+        return false;
     }
-
-    switch (direction) {
-        case 0: game.head_x--; break;
-        case 1: game.head_x++; break;
-        case 2: game.head_y--; break;
-        case 3: game.head_y++; break;
-    }
-
-    game.steps_since_last_food++;
-
-    if (!isPositionSafe(game.head_x, game.head_y)) {
-        return true;
-    }
-
-    game.trail.insert(game.trail.begin(), {game.head_x, game.head_y});
-    if (game.trail.size() > game.length + 2) {
-        game.trail.resize(game.length + 2);
-    }
-
-    game.body.insert(game.body.begin(), {game.head_x, game.head_y});
-    if (game.body.size() > game.length) {
-        game.body.resize(game.length);
-    }
-
-    if (game.head_x == game.food_x && game.head_y == game.food_y) {
-        game.score++;
-        game.lifetime_score++;
-        game.length++;
-        game.steps_since_last_food = 0;
-        spawnFood();
-    }
-
-    if (game.steps_since_last_food > MAX_STEPS_WITHOUT_FOOD) {
-        return true;
-    }
-
-    return false;
-}
-
-void initSDL() {
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        cerr << "SDL_Init Error: " << SDL_GetError() << endl;
-        exit(1);
-    }
-
-    sdl.window = SDL_CreateWindow("AI Snake",
-                                SDL_WINDOWPOS_CENTERED,
-                                SDL_WINDOWPOS_CENTERED,
-                                WIDTH * CELL_SIZE,
-                                HEIGHT * CELL_SIZE,
-                                SDL_WINDOW_SHOWN);
-    if (!sdl.window) {
-        cerr << "SDL_CreateWindow Error: " << SDL_GetError() << endl;
-        SDL_Quit();
-        exit(1);
-    }
-
-    sdl.renderer = SDL_CreateRenderer(sdl.window, -1, 
-                                    SDL_RENDERER_ACCELERATED | 
-                                    SDL_RENDERER_PRESENTVSYNC);
-    if (!sdl.renderer) {
-        cerr << "SDL_CreateRenderer Error: " << SDL_GetError() << endl;
-        SDL_DestroyWindow(sdl.window);
-        SDL_Quit();
-        exit(1);
-    }
-
-    if (SDL_SetRenderDrawBlendMode(sdl.renderer, SDL_BLENDMODE_BLEND) != 0) {
-        cerr << "SDL_SetRenderDrawBlendMode Error: " << SDL_GetError() << endl;
-    }
-
-    sdl.initialized = true;
-
-    #ifdef __EMSCRIPTEN__
-    EM_ASM({
-        Module.canvas.width = 400;
-        Module.canvas.height = 400;
-        Module.canvas.style.width = '400px';
-        Module.canvas.style.height = '400px';
-    });
-    #endif
-}
-
-void drawGame() {
-    if (!sdl.initialized) return;
     
-    SDL_SetRenderDrawColor(sdl.renderer, 0, 0, 0, 255);
-    SDL_RenderClear(sdl.renderer);
-
-    SDL_SetRenderDrawColor(sdl.renderer, 30, 30, 30, 255);
-    for (int x = 0; x < WIDTH; x++) {
-        SDL_RenderDrawLine(sdl.renderer, x * CELL_SIZE, 0, x * CELL_SIZE, HEIGHT * CELL_SIZE);
+    std::pair<int, int> get_action(GameState& state) {
+        std::mt19937 gen(std::random_device{}());
+        std::uniform_real_distribution<> dis(0.0, 1.0);
+        
+        // Exploration: random action
+        if (dis(gen) < exploration_rate) {
+            std::vector<std::pair<int, int>> possible_actions = {
+                {1, 0},  // Right
+                {-1, 0},  // Left
+                {0, 1},   // Down
+                {0, -1}   // Up
+            };
+            
+            // Remove current opposite direction to prevent instant death
+            auto opposite_dir = std::make_pair(-state.direction.first, -state.direction.second);
+            possible_actions.erase(
+                std::remove(possible_actions.begin(), possible_actions.end(), opposite_dir),
+                possible_actions.end()
+            );
+            
+            std::uniform_int_distribution<> action_dis(0, possible_actions.size() - 1);
+            return possible_actions[action_dis(gen)];
+        }
+        
+        // Exploitation: best action from Q-table
+        std::string state_key = get_state_key(state);
+        if (q_table.find(state_key) == q_table.end()) {
+            q_table[state_key] = {0, 0, 0, 0};
+        }
+        
+        auto& actions = q_table[state_key];
+        int best_action = std::distance(actions.begin(), std::max_element(actions.begin(), actions.end()));
+        
+        std::vector<std::pair<int, int>> possible_actions = {
+            {1, 0},  // Right
+            {-1, 0}, // Left
+            {0, 1},  // Down
+            {0, -1}  // Up
+        };
+        
+        return possible_actions[best_action];
     }
-    for (int y = 0; y < HEIGHT; y++) {
-        SDL_RenderDrawLine(sdl.renderer, 0, y * CELL_SIZE, WIDTH * CELL_SIZE, y * CELL_SIZE);
+    
+    void learn(const std::string& state_key, int action_idx, double reward, const std::string& new_state_key) {
+        if (q_table.find(state_key) == q_table.end()) {
+            q_table[state_key] = {0, 0, 0, 0};
+        }
+        
+        if (q_table.find(new_state_key) == q_table.end()) {
+            q_table[new_state_key] = {0, 0, 0, 0};
+        }
+        
+        double max_future_q = *std::max_element(q_table[new_state_key].begin(), q_table[new_state_key].end());
+        double current_q = q_table[state_key][action_idx];
+        
+        double new_q = current_q + LEARNING_RATE * (reward + DISCOUNT_FACTOR * max_future_q - current_q);
+        q_table[state_key][action_idx] = new_q;
     }
+};
 
-    SDL_SetRenderDrawColor(sdl.renderer, 255, 0, 0, 255);
-    SDL_Rect food = {game.food_y * CELL_SIZE, game.food_x * CELL_SIZE, CELL_SIZE, CELL_SIZE};
-    SDL_RenderFillRect(sdl.renderer, &food);
+// Global variables
+GameState game;
+QLearningAgent q_learning;
+double avg_q = 0.0;
+std::chrono::time_point<std::chrono::system_clock> last_update;
 
-    for (size_t i = 0; i < game.body.size(); i++) {
-        const auto& seg = game.body[i];
-        if (seg.size() == 2) {
-            if (i == 0) {
-                SDL_SetRenderDrawColor(sdl.renderer, 0, 255, 0, 255);
-            } else {
-                int intensity = 100 + (155 * i / game.body.size());
-                SDL_SetRenderDrawColor(sdl.renderer, 0, intensity, 0, 255);
+// Helper functions
+double getMinExploration() {
+    return MIN_EXPLORATION;
+}
+
+void updateCharts(int episodes, int score, double avg_q, double exploration_rate, int lifetime_score) {
+    EM_ASM({
+        updateCharts($0, $1, $2, $3, $4);
+    }, episodes, score, avg_q, exploration_rate, lifetime_score);
+}
+
+void place_food() {
+    std::mt19937 gen(std::random_device{}());
+    std::uniform_int_distribution<> dis(0, GRID_SIZE - 1);
+    
+    while (true) {
+        game.food = {dis(gen), dis(gen)};
+        bool valid = true;
+        
+        for (const auto& segment : game.snake) {
+            if (segment == game.food) {
+                valid = false;
+                break;
             }
-            SDL_Rect body = {seg[1] * CELL_SIZE, seg[0] * CELL_SIZE, CELL_SIZE, CELL_SIZE};
-            SDL_RenderFillRect(sdl.renderer, &body);
+        }
+        
+        if (valid) break;
+    }
+}
+
+void reset_game() {
+    game.snake.clear();
+    game.snake.push_back({GRID_SIZE / 2, GRID_SIZE / 2});
+    game.direction = {1, 0};
+    game.score = 0;
+    game.game_over = false;
+    game.speed = INITIAL_SPEED;
+    place_food();
+}
+
+void update() {
+    if (game.game_over) return;
+    
+    // Move snake
+    auto new_head = game.snake.front();
+    new_head.first += game.direction.first;
+    new_head.second += game.direction.second;
+    
+    // Check wall collision
+    if (new_head.first < 0 || new_head.first >= GRID_SIZE ||
+        new_head.second < 0 || new_head.second >= GRID_SIZE) {
+        game.game_over = true;
+        return;
+    }
+    
+    // Check self collision
+    for (const auto& segment : game.snake) {
+        if (segment == new_head) {
+            game.game_over = true;
+            return;
         }
     }
-
-    SDL_RenderPresent(sdl.renderer);
-}
-
-void logPerformance() {
-    if (!game.initialized || !q_learning.initialized) return;
     
-    if (q_learning.episodes % LOG_INTERVAL == 0) {
-        float total_q = 0;
+    game.snake.insert(game.snake.begin(), new_head);
+    
+    // Check food collision
+    if (new_head == game.food) {
+        game.score++;
+        game.lifetime_score++;
+        place_food();
+        
+        // Increase speed slightly
+        game.speed = std::max(50, game.speed - 5);
+    } else {
+        game.snake.pop_back();
+    }
+    
+    // Update Q-learning
+    std::string old_state_key = q_learning.get_state_key(game);
+    int action_idx = 0;
+    if (game.direction.first == 1) action_idx = 0;
+    else if (game.direction.first == -1) action_idx = 1;
+    else if (game.direction.second == 1) action_idx = 2;
+    else action_idx = 3;
+    
+    double reward = 0.0;
+    if (new_head == game.food) {
+        reward = 10.0;
+    } else if (game.game_over) {
+        reward = -10.0;
+    } else {
+        reward = -0.1;  // Small negative reward for each step to encourage efficiency
+    }
+    
+    std::string new_state_key = q_learning.get_state_key(game);
+    q_learning.learn(old_state_key, action_idx, reward, new_state_key);
+    
+    // Calculate average Q-value for stats
+    if (!q_learning.q_table.empty()) {
+        double total_q = 0.0;
         int count = 0;
-        for (const auto& row : q_learning.table) {
-            for (float val : row) {
-                total_q += val;
+        for (const auto& entry : q_learning.q_table) {
+            for (double q : entry.second) {
+                total_q += q;
                 count++;
             }
         }
-        float avg_q = count > 0 ? total_q / count : 0;
-
-        performance.scores.push_back(game.score);
-        performance.avg_q_values.push_back(avg_q);
-        performance.lengths.push_back(game.length);
-
-        #ifdef __EMSCRIPTEN__
-        updateCharts(q_learning.episodes, game.score, avg_q, q_learning.exploration_rate, game.lifetime_score);
-        #else
-        cout << "Episode: " << q_learning.episodes 
-             << " | Score: " << game.score 
-             << " | Lifetime: " << game.lifetime_score
-             << " | Avg Q: " << avg_q
-             << " | Exploration: " << q_learning.exploration_rate << endl;
-        #endif
+        avg_q = total_q / count;
     }
 }
 
-void initializeGame() {
-    static bool initialized = false;
-    if (initialized) return;
+void game_loop() {
+    auto now = std::chrono::system_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_update).count();
     
-    initQTable();
-    resetGame();
-    initSDL();
-    
-    initialized = true;
-}
-
-void mainLoop() {
-    initializeGame();
-    
-    static int direction = rand() % 4;
-    static int reset_timer = 0;
-
-    if (reset_timer > 0) {
-        reset_timer--;
-        if (reset_timer == 0) {
-            resetGame();
-        }
-        return;
-    }
-
-    bool crashed = moveSnake(direction);
-    drawGame();
-
-    if (q_learning.episodes < MAX_TRAINING_EPISODES) {
-        q_learning.episodes++;
-        q_learning.exploration_rate = max(getMinExploration(), 
-                                         q_learning.exploration_rate * q_learning.exploration_decay);
-        logPerformance();
-    }
-
-    if (crashed) {
-        reset_timer = 5;
-    }
-}
-
-void cleanup() {
-    if (sdl.initialized) {
-        SDL_DestroyRenderer(sdl.renderer);
-        SDL_DestroyWindow(sdl.window);
-        SDL_Quit();
-    }
-}
-
-void cleanupBeforeUnload() {
-    cleanup();
-}
-
-extern "C" {
-    EMSCRIPTEN_KEEPALIVE
-    float getExplorationRate() {
-        return q_learning.exploration_rate;
-    }
-
-    EMSCRIPTEN_KEEPALIVE
-    const char* beforeUnloadHandler(int eventType, const void* reserved, void* userData) {
-        if (!game.initialized || !q_learning.initialized || !sdl.initialized) {
-            return nullptr;
-        }
-        cleanupBeforeUnload();
-        static const char message[] = "Are you sure you want to leave?";
-        return message;
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EM_JS(void, initChartJS, (), {
-    function initializeCharts() {
-        if (typeof Chart === 'undefined' || !Module.canvas) {
-            setTimeout(initializeCharts, 100);
-            return;
-        }
-
-        var container = document.getElementById('chart-container');
-        if (!container) {
-            container = document.createElement('div');
-            container.id = 'chart-container';
-            container.style.width = '800px';
-            container.style.margin = '20px auto';
-            container.style.padding = '20px';
-            container.style.backgroundColor = '#333';
-            document.body.insertBefore(container, Module.canvas.nextSibling);
-        }
-
-        ['scoreChart', 'qValueChart', 'lifetimeChart'].forEach(id => {
-            if (!document.getElementById(id)) {
-                var canvas = document.createElement('canvas');
-                canvas.id = id;
-                canvas.style.marginBottom = '20px';
-                container.appendChild(canvas);
-            }
-        });
-
-        window.scoreChart = new Chart(document.getElementById('scoreChart'), {
-            type: 'line',
-            data: { labels: [], datasets: [{
-                label: 'Episode Score',
-                data: [],
-                borderColor: 'rgba(75, 192, 192, 1)',
-                borderWidth: 1,
-                fill: false
-            }]},
-            options: { responsive: true, scales: { y: { beginAtZero: true } } }
-        });
-
-        window.qValueChart = new Chart(document.getElementById('qValueChart'), {
-            type: 'line',
-            data: { labels: [], datasets: [{
-                label: 'Average Q Value',
-                data: [],
-                borderColor: 'rgba(153, 102, 255, 1)',
-                borderWidth: 1,
-                fill: false
-            }]},
-            options: { responsive: true, scales: { y: { beginAtZero: true } } }
-        });
-
-        window.lifetimeChart = new Chart(document.getElementById('lifetimeChart'), {
-            type: 'line',
-            data: { labels: [], datasets: [{
-                label: 'Lifetime Score',
-                data: [],
-                borderColor: 'rgba(255, 99, 132, 1)',
-                borderWidth: 1,
-                fill: false
-            }]},
-            options: { responsive: true, scales: { y: { beginAtZero: true } } }
-        });
-    }
-
-    if (document.readyState === 'complete') {
-        initializeCharts();
-    } else {
-        document.addEventListener('DOMContentLoaded', initializeCharts);
-    }
-});
-
-EM_JS(void, updateCharts, (int episode, int score, float avg_q, float exploration, int lifetime_score), {
-    try {
-        var statusElement = document.getElementById('status');
-        if (statusElement) {
-            statusElement.innerHTML = 
-                `Episode: ${episode} | Score: ${score} | Lifetime: ${lifetime_score} | Avg Q: ${avg_q.toFixed(2)} | Exploration: ${exploration.toFixed(4)}`;
+    if (elapsed >= game.speed) {
+        last_update = now;
+        
+        if (!game.game_over) {
+            update();
+        } else {
+            q_learning.episodes++;
+            q_learning.exploration_rate = std::max(getMinExploration(), 
+                                                  q_learning.exploration_rate * EXPLORATION_DECAY);
+            reset_game();
         }
         
-        if (window.scoreChart && window.qValueChart && window.lifetimeChart) {
-            function updateChart(chart, value) {
-                chart.data.labels.push(episode);
-                chart.data.datasets[0].data.push(value);
-                if (chart.data.labels.length > 500) {
-                    chart.data.labels.shift();
-                    chart.data.datasets[0].data.shift();
-                }
-                chart.update();
-            }
-            
-            updateChart(window.scoreChart, score);
-            updateChart(window.qValueChart, avg_q);
-            updateChart(window.lifetimeChart, lifetime_score);
-        }
-    } catch(e) {
-        console.error('Chart update error:', e);
+        updateCharts(q_learning.episodes, game.score, avg_q, q_learning.exploration_rate, game.lifetime_score);
     }
-});
-#endif
+    
+    emscripten_set_main_loop(game_loop, 0, 1);
+}
+
+EMSCRIPTEN_BINDINGS(aisnake) {
+    emscripten::function("resetGame", &reset_game);
+    emscripten::function("getGameState", &get_game_state);
+    emscripten::function("setDirection", &set_direction);
+    
+    emscripten::value_object<GameState>("GameState")
+        .field("score", &GameState::score)
+        .field("gameOver", &GameState::game_over)
+        .field("snake", &GameState::snake)
+        .field("food", &GameState::food);
+    
+    emscripten::register_vector<std::pair<int, int>>("vector<pair<int,int>>");
+    emscripten::value_object<std::pair<int, int>>("pair<int,int>")
+        .field("first", &std::pair<int, int>::first)
+        .field("second", &std::pair<int, int>::second);
+}
+
+// JS-interop functions
+GameState get_game_state() {
+    return game;
+}
+
+void set_direction(int x, int y) {
+    // Prevent reversing direction
+    if (game.direction.first != -x && game.direction.second != -y) {
+        game.direction = {x, y};
+    }
+}
 
 int main() {
-    srand((unsigned)time(nullptr));
-
-    #ifdef __EMSCRIPTEN__
-    export_functions();
-    initChartJS();
-    
-    // Delay event handler registration
-    EM_ASM({
-        Module['ready'] = false;
-        
-        setTimeout(function() {
-            Module['ready'] = true;
-            window.addEventListener('beforeunload', function(e) {
-                if (Module['_beforeUnloadHandler']) {
-                    var result = Module['_beforeUnloadHandler']();
-                    if (result) {
-                        e.preventDefault();
-                        e.returnValue = result;
-                        return result;
-                    }
-                }
-            });
-            
-            document.addEventListener('visibilitychange', function() {
-                // Handle visibility changes if needed
-            });
-        }, 1000);
-    });
-    #endif
-
-    auto all_positions = generateAllPositions();
-    game.body = {{HEIGHT/2, WIDTH/2}};
-    game.trail = {{HEIGHT/2, WIDTH/2}};
-    auto free_positions = getFreePositions(game.trail, all_positions);
-    if (!free_positions.empty()) {
-        game.food_x = free_positions[0][0];
-        game.food_y = free_positions[0][1];
-    }
-
-    initQTable();
-    initSDL();
-
-    #ifdef __EMSCRIPTEN__
-    emscripten_set_main_loop(mainLoop, 0, 1);
-    #else
-    int direction = rand() % 4;
-    int reset_timer = 0;
-    
-    bool running = true;
-    while (running) {
-        if (reset_timer > 0) {
-            reset_timer--;
-            if (reset_timer == 0) {
-                resetGame();
-            }
-            SDL_Delay(game.speed);
-            continue;
-        }
-
-        bool crashed = moveSnake(direction);
-        drawGame();
-        SDL_Delay(game.speed);
-
-        if (q_learning.episodes < MAX_TRAINING_EPISODES) {
-            q_learning.episodes++;
-            q_learning.exploration_rate = max(getMinExploration(), 
-                                            q_learning.exploration_rate * q_learning.exploration_decay);
-            logPerformance();
-        }
-
-        if (crashed) {
-            reset_timer = 5;
-        }
-
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT) {
-                running = false;
-            }
-        }
-    }
-    #endif
-
-    cleanup();
+    reset_game();
+    last_update = std::chrono::system_clock::now();
+    emscripten_set_main_loop(game_loop, 0, 1);
     return 0;
 }
