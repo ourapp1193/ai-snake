@@ -6,7 +6,6 @@ set(CMAKE_CXX_STANDARD 17)
 if(EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
     
-    # Combined linker flags for better readability
     set(CMAKE_EXE_LINKER_FLAGS
         "${CMAKE_EXE_LINKER_FLAGS} \
         -sUSE_SDL=2 \
@@ -16,20 +15,18 @@ if(EMSCRIPTEN)
         -sINITIAL_MEMORY=64MB \
         --shell-file ${CMAKE_SOURCE_DIR}/shell.html \
         -sEXPORTED_FUNCTIONS=['_main','_getExplorationRate','_malloc','_free'] \
-        -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','allocate','intArrayFromString'] \
+        -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString'] \
         -sMODULARIZE=1 \
         -sENVIRONMENT=web \
         -sNO_EXIT_RUNTIME=1 \
         -sFORCE_FILESYSTEM=1 \
-        -sASYNCIFY \
-        -sASYNCIFY_IMPORTS=['emscripten_sleep']")
+        -sDYNAMIC_EXECUTION=0 \
+        -sTEXTDECODER=0 \
+        -sINCOMING_MODULE_JS_API=[] \
+        -sEXPORT_NAME='createModule' \
+        -sUSE_ES6_IMPORT_META=0")
         
-    # Compiler flags
     add_compile_options(-O3 -flto -fno-rtti -fno-exceptions)
-    
-    # For debugging (uncomment when needed)
-    # add_compile_options(-g4 -sSAFE_HEAP=1 -sSTACK_OVERFLOW_CHECK=1)
-    # set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -sDEMANGLE_SUPPORT=1")
 else()
     find_package(SDL2 REQUIRED)
     add_compile_options(-O3)
@@ -42,7 +39,6 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(aisnake_web ${SDL2_LIBRARIES})
 endif()
 
-# For Emscripten, set output names
 if(EMSCRIPTEN)
     set_target_properties(aisnake_web PROPERTIES
         OUTPUT_NAME "aisnake_web"
