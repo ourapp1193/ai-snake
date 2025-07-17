@@ -185,20 +185,15 @@ EM_JS(void, updateCharts, (int episode, int score, float avg_q, float exploratio
 });
 #endif
 
+#ifdef __EMSCRIPTEN__
 extern "C" {
     EMSCRIPTEN_KEEPALIVE
-    float getExplorationRate() {
-        return q_learning.exploration_rate;
-    }
-
-    EMSCRIPTEN_KEEPALIVE
-    void cleanupBeforeUnload() {
-        // Cleanup resources before page unload
-        SDL_DestroyRenderer(sdl.renderer);
-        SDL_DestroyWindow(sdl.window);
-        SDL_Quit();
+    const char* beforeUnloadHandler(int eventType, const void* reserved, void* userData) {
+        cleanupBeforeUnload();
+        return "Are you sure you want to leave?";
     }
 }
+#endif
 
 vector<vector<int>> generateAllPositions() {
     vector<vector<int>> positions(WIDTH * HEIGHT, vector<int>(2));
@@ -696,10 +691,7 @@ int main() {
     #ifdef __EMSCRIPTEN__
     export_functions();
     initChartJS();
-    emscripten_set_beforeunload_callback(nullptr, []() -> const char* {
-        cleanupBeforeUnload();
-        return "Are you sure you want to leave?";
-    });
+    emscripten_set_beforeunload_callback(nullptr, beforeUnloadHandler);
     #endif
 
     auto all_positions = generateAllPositions();
