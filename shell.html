@@ -14,6 +14,8 @@
         }
         #container {
             display: flex;
+            flex-direction: column;
+            align-items: center;
             width: 100%;
         }
         #status {
@@ -22,6 +24,7 @@
             padding: 10px;
             background: #333;
             border-radius: 5px;
+            width: 80%;
         }
         #game-canvas {
             display: block;
@@ -35,9 +38,12 @@
         }
         #chart-container {
             display: flex;
+            justify-content: space-around;
+            width: 100%;
             margin-top: 20px;
         }
         .chart {
+            width: 30%;
             height: 130px;
         }
         .hidden {
@@ -63,43 +69,47 @@
     </div>
 
     <script>
-        // Initialize charts first
+        // Initialize charts
         function initializeCharts() {
-            window.scoreChart = new Chart(document.getElementById('scoreChart'), {
-                type: 'line',
-                data: { labels: [], datasets: [{
-                    label: 'Score',
-                    data: [],
-                    borderColor: 'rgba(75, 192, 192, 1)',
-                    borderWidth: 1,
-                    fill: false
-                }]},
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-            
-            window.qValueChart = new Chart(document.getElementById('qValueChart'), {
-                type: 'line',
-                data: { labels: [], datasets: [{
-                    label: 'Avg Q Value',
-                    data: [],
-                    borderColor: 'rgba(153, 102, 255, 1)',
-                    borderWidth: 1,
-                    fill: false
-                }]},
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-            
-            window.lifetimeChart = new Chart(document.getElementById('lifetimeChart'), {
-                type: 'line',
-                data: { labels: [], datasets: [{
-                    label: 'Lifetime Score',
-                    data: [],
-                    borderColor: 'rgba(255, 99, 132, 1)',
-                    borderWidth: 1,
-                    fill: false
-                }]},
-                options: { responsive: true, maintainAspectRatio: false }
-            });
+            try {
+                window.scoreChart = new Chart(document.getElementById('scoreChart'), {
+                    type: 'line',
+                    data: { labels: [], datasets: [{
+                        label: 'Score',
+                        data: [],
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1,
+                        fill: false
+                    }]},
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+                
+                window.qValueChart = new Chart(document.getElementById('qValueChart'), {
+                    type: 'line',
+                    data: { labels: [], datasets: [{
+                        label: 'Avg Q Value',
+                        data: [],
+                        borderColor: 'rgba(153, 102, 255, 1)',
+                        borderWidth: 1,
+                        fill: false
+                    }]},
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+                
+                window.lifetimeChart = new Chart(document.getElementById('lifetimeChart'), {
+                    type: 'line',
+                    data: { labels: [], datasets: [{
+                        label: 'Lifetime Score',
+                        data: [],
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1,
+                        fill: false
+                    }]},
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+            } catch (e) {
+                console.error("Chart initialization failed:", e);
+            }
         }
 
         // Configure the WASM module
@@ -115,32 +125,45 @@
 
             instantiateWasm: function(info, receiveInstance) {
                 fetch('aisnake_web.wasm')
-                    .then(response => response.arrayBuffer())
+                    .then(response => {
+                        if (!response.ok) throw new Error("WASM file not found");
+                        return response.arrayBuffer();
+                    })
                     .then(bytes => WebAssembly.instantiate(bytes, info))
                     .then(result => receiveInstance(result.instance))
                     .catch(err => {
                         console.error('WASM instantiation failed:', err);
-                        document.getElementById('status').textContent = 'Failed to load game: ' + err;
+                        document.getElementById('status').textContent = 'Failed to load game: ' + err.message;
                     });
                 return {};
             },
 
             onRuntimeInitialized: function() {
-                // Initialize UI
-                var statusElement = document.getElementById('status');
-                var canvasElement = document.getElementById('game-canvas');
-                var chartContainer = document.getElementById('chart-container');
+                try {
+                    var statusElement = document.getElementById('status');
+                    var canvasElement = document.getElementById('game-canvas');
+                    var chartContainer = document.getElementById('chart-container');
 
-                statusElement.classList.remove('hidden');
-                statusElement.textContent = 'Game loaded - training started';
-                canvasElement.classList.remove('hidden');
-                chartContainer.classList.remove('hidden');
-                
-                // Initialize charts
-                initializeCharts();
-                
-                // Start the game
-                Module._main();
+                    statusElement.classList.remove('hidden');
+                    statusElement.textContent = 'Game loaded - training started';
+                    canvasElement.classList.remove('hidden');
+                    chartContainer.classList.remove('hidden');
+                    
+                    initializeCharts();
+                    
+                    // Start the game
+                    setTimeout(() => {
+                        try {
+                            Module._main();
+                        } catch (e) {
+                            console.error("Error starting game:", e);
+                            statusElement.textContent = 'Error starting game: ' + e.message;
+                        }
+                    }, 100);
+                } catch (e) {
+                    console.error("Runtime initialization error:", e);
+                    document.getElementById('status').textContent = 'Initialization error: ' + e.message;
+                }
             },
 
             printErr: function(text) {
@@ -153,13 +176,25 @@
             }
         };
 
-        // Load the script after the Module is configured
-        var script = document.createElement('script');
-        script.src = 'aisnake_web.js';
-        script.onerror = function() {
-            document.getElementById('status').textContent = 'Failed to load game script';
-        };
-        document.body.appendChild(script);
+        // Load the script
+        function loadScript() {
+            return new Promise((resolve, reject) => {
+                var script = document.createElement('script');
+                script.src = 'aisnake_web.js';
+                script.onload = resolve;
+                script.onerror = () => reject(new Error("Failed to load script"));
+                document.body.appendChild(script);
+            });
+        }
+
+        // Initialize everything
+        document.getElementById('status').classList.remove('hidden');
+        loadScript()
+            .then(() => console.log("Script loaded successfully"))
+            .catch(err => {
+                console.error("Script loading failed:", err);
+                document.getElementById('status').textContent = 'Failed to load game script: ' + err.message;
+            });
     </script>
 </body>
 </html>
