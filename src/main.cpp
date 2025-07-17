@@ -317,6 +317,10 @@ void initQTable() {
 int getStateIndex(int x, int y, int dir) {
     if (!isPositionValid(x, y)) return 0;
     
+    // Ensure x and y are within bounds
+    x = max(0, min(HEIGHT-1, x));
+    y = max(0, min(WIDTH-1, y));
+    
     // Simplified state representation
     int food_dir = 0;
     if (game.food_x > x) food_dir = 1;
@@ -331,7 +335,9 @@ int getStateIndex(int x, int y, int dir) {
     if (!isPositionSafe(x, y-1)) danger |= 4;
     if (!isPositionSafe(x, y+1)) danger |= 8;
     
-    return (y * WIDTH + x) * 16 + food_dir * 4 + danger;
+    // Calculate index with bounds checking
+    int index = (y * WIDTH + x) * 16 + food_dir * 4 + danger;
+    return max(0, min((int)q_learning.table.size() - 1, index));
 }
 
 int chooseAction(int x, int y, int current_dir) {
