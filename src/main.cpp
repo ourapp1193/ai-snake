@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <queue>
 #include <cmath>
-#include <SDL/SDL.h>
 #ifdef __EMSCRIPTEN__
-#include <emscripten.h>
+#include <SDL2/SDL.h>
+#else
+#include <SDL/SDL.h>
+#endif#include <emscripten.h>
 #include <emscripten/html5.h>
 
 EM_JS(void, export_functions, (), {
