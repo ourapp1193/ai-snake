@@ -187,6 +187,8 @@ EM_JS(void, updateCharts, (int episode, int score, float avg_q, float exploratio
 #endif
 
 extern "C" {
+    
+    
     EMSCRIPTEN_KEEPALIVE
     float getExplorationRate() {
         return q_learning.exploration_rate;
@@ -195,7 +197,8 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     const char* beforeUnloadHandler(int eventType, const void* reserved, void* userData) {
         cleanupBeforeUnload();
-        return "Are you sure you want to leave?";
+        static const char message[] = "Are you sure you want to leave?";
+        return message;
     }
 }
 
@@ -383,11 +386,16 @@ int chooseAction(int x, int y, int current_dir) {
 }
 
 void updateQTable(int old_state, int action, int new_state, float reward) {
-    if (old_state < 0 || old_state >= q_learning.table.size() ||
+    
+     if (old_state < 0 || old_state >= q_learning.table.size() ||
         new_state < 0 || new_state >= q_learning.table.size() ||
         action < 0 || action >= 4) {
         return; // Skip invalid updates
+    }
     
+    if (old_state >= 0 && old_state < q_learning.table.size() &&
+        new_state >= 0 && new_state < q_learning.table.size() &&
+        action >= 0 && action < 4) {
         
         float max_future = 0.0f;
         if (!q_learning.table[new_state].empty()) {
@@ -688,7 +696,6 @@ int main() {
     emscripten_set_beforeunload_callback(nullptr, beforeUnloadHandler);
     emscripten_set_visibilitychange_callback(nullptr, 1, visibilityChangeHandler);
     #endif
-
 
     auto all_positions = generateAllPositions();
     game.body = {{HEIGHT/2, WIDTH/2}};
