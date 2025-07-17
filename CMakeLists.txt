@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 if(EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
     
-    # These flags must be set as linker flags, not compile options
+    # These flags must be linker flags
     set(CMAKE_EXE_LINKER_FLAGS 
         "${CMAKE_EXE_LINKER_FLAGS} -sUSE_SDL=2")
     set(CMAKE_EXE_LINKER_FLAGS 
@@ -24,9 +24,9 @@ if(EMSCRIPTEN)
     set(CMAKE_EXE_LINKER_FLAGS
         "${CMAKE_EXE_LINKER_FLAGS} -sSAFE_HEAP=1")
         
-    # Compiler flags
-    add_compile_options(-O3 -sASSERTIONS=1 -sDEMANGLE_SUPPORT=1 -Werror=undefined)
-    add_link_options(-Werror=undefined)
+    # Compiler flags (remove linker-only flags)
+    add_compile_options(-O3 -Werror=undefined)
+    add_link_options(-Werror=undefined -sASSERTIONS=1 -sDEMANGLE_SUPPORT=1)
 else()
     find_package(SDL2 REQUIRED)
     add_compile_options(-O3)
