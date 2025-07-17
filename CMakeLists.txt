@@ -11,24 +11,18 @@ if(EMSCRIPTEN)
         "${CMAKE_EXE_LINKER_FLAGS} \
         -sUSE_SDL=2 \
         -sUSE_WEBGL2=1 \
-        -sUSE_GLFW=3 \
-        -sFULL_ES3=1 \
         -sALLOW_MEMORY_GROWTH=1 \
         -sASSERTIONS=1 \
         -sINITIAL_MEMORY=64MB \
-        -sMAX_WEBGL_VERSION=2 \
         --shell-file ${CMAKE_SOURCE_DIR}/shell.html \
         -sEXPORTED_FUNCTIONS=['_main','_getExplorationRate','_malloc','_free'] \
         -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','allocate','intArrayFromString'] \
         -sMODULARIZE=1 \
-        -sENVIRONMENT=web,worker \
+        -sENVIRONMENT=web \
         -sNO_EXIT_RUNTIME=1 \
-        -sINVOKE_RUN=0 \
-        -sSTRICT=1 \
-        -sLEGACY_GL_EMULATION=1 \
         -sFORCE_FILESYSTEM=1 \
         -sASYNCIFY \
-        -sASYNCIFY_IMPORTS=['emscripten_sleep','eglGetProcAddress']")
+        -sASYNCIFY_IMPORTS=['emscripten_sleep']")
         
     # Compiler flags
     add_compile_options(-O3 -flto -fno-rtti -fno-exceptions)
