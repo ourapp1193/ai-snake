@@ -1,121 +1,65 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>AI Snake Training</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{{ TITLE }}}</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
+        html, body {
             margin: 0;
-            padding: 20px;
-            background-color: #222;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: Arial, sans-serif;
             color: white;
         }
         #container {
             display: flex;
             flex-direction: column;
             align-items: center;
-            width: 100%;
+        }
+        #canvas {
+            display: block;
+            background-color: black;
         }
         #status {
-            text-align: center;
-            margin-bottom: 20px;
+            margin: 10px 0;
             padding: 10px;
-            background: #333;
+            background-color: #333;
             border-radius: 5px;
-            width: 80%;
-        }
-        #game-canvas {
-            display: block;
-            margin: 20px auto;
-            background: black;
+            text-align: center;
         }
         #loading {
-            text-align: center;
-            margin: 20px;
-            font-size: 18px;
-        }
-        #chart-container {
-            display: flex;
-            justify-content: space-around;
-            width: 100%;
-            margin-top: 20px;
-        }
-        .chart {
-            width: 30%;
-            height: 130px;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
         }
         .hidden {
             display: none;
         }
     </style>
+    {{{ SCRIPT }}}
 </head>
 <body>
-    <div id="status" class="hidden">Loading game...</div>
-    <div id="container">
-        <canvas id="game-canvas" width="400" height="400" class="hidden"></canvas>
-        <div id="chart-container" class="hidden">
-            <div class="chart">
-                <canvas id="scoreChart"></canvas>
-            </div>
-            <div class="chart">
-                <canvas id="qValueChart"></canvas>
-            </div>
-            <div class="chart">
-                <canvas id="lifetimeChart"></canvas>
-            </div>
-        </div>
+    <div id="loading">Loading game...</div>
+    <div id="container" class="hidden">
+        <div id="status">Initializing AI Snake...</div>
+        <canvas id="canvas"></canvas>
     </div>
 
     <script>
-        // Initialize charts
-        function initializeCharts() {
-            try {
-                window.scoreChart = new Chart(document.getElementById('scoreChart'), {
-                    type: 'line',
-                    data: { labels: [], datasets: [{
-                        label: 'Score',
-                        data: [],
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        borderWidth: 1,
-                        fill: false
-                    }]},
-                    options: { responsive: true, maintainAspectRatio: false }
-                });
-                
-                window.qValueChart = new Chart(document.getElementById('qValueChart'), {
-                    type: 'line',
-                    data: { labels: [], datasets: [{
-                        label: 'Avg Q Value',
-                        data: [],
-                        borderColor: 'rgba(153, 102, 255, 1)',
-                        borderWidth: 1,
-                        fill: false
-                    }]},
-                    options: { responsive: true, maintainAspectRatio: false }
-                });
-                
-                window.lifetimeChart = new Chart(document.getElementById('lifetimeChart'), {
-                    type: 'line',
-                    data: { labels: [], datasets: [{
-                        label: 'Lifetime Score',
-                        data: [],
-                        borderColor: 'rgba(255, 99, 132, 1)',
-                        borderWidth: 1,
-                        fill: false
-                    }]},
-                    options: { responsive: true, maintainAspectRatio: false }
-                });
-            } catch (e) {
-                console.error("Chart initialization failed:", e);
-            }
-        }
-
         // Configure the WASM module
         var Module = {
             canvas: (function() {
-                var canvas = document.getElementById('game-canvas');
+                var canvas = document.getElementById('canvas');
                 canvas.addEventListener('webglcontextlost', function(e) {
                     alert('WebGL context lost. Please reload the page.');
                     e.preventDefault();
@@ -123,78 +67,38 @@
                 return canvas;
             })(),
 
-            instantiateWasm: function(info, receiveInstance) {
-                fetch('aisnake_web.wasm')
-                    .then(response => {
-                        if (!response.ok) throw new Error("WASM file not found");
-                        return response.arrayBuffer();
-                    })
-                    .then(bytes => WebAssembly.instantiate(bytes, info))
-                    .then(result => receiveInstance(result.instance))
-                    .catch(err => {
-                        console.error('WASM instantiation failed:', err);
-                        document.getElementById('status').textContent = 'Failed to load game: ' + err.message;
-                    });
-                return {};
+            onRuntimeInitialized: function() {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('container').classList.remove('hidden');
+                
+                // Set canvas size based on game dimensions
+                var canvas = document.getElementById('canvas');
+                canvas.width = 20 * 20;  // WIDTH * CELL_SIZE
+                canvas.height = 20 * 20; // HEIGHT * CELL_SIZE
+                
+                // Start the game
+                setTimeout(function() {
+                    try {
+                        Module._main();
+                    } catch(e) {
+                        console.error("Error starting game:", e);
+                        document.getElementById('status').textContent = 'Error: ' + e.message;
+                    }
+                }, 100);
             },
 
-            onRuntimeInitialized: function() {
-                try {
-                    var statusElement = document.getElementById('status');
-                    var canvasElement = document.getElementById('game-canvas');
-                    var chartContainer = document.getElementById('chart-container');
-
-                    statusElement.classList.remove('hidden');
-                    statusElement.textContent = 'Game loaded - training started';
-                    canvasElement.classList.remove('hidden');
-                    chartContainer.classList.remove('hidden');
-                    
-                    initializeCharts();
-                    
-                    // Start the game
-                    setTimeout(() => {
-                        try {
-                            Module._main();
-                        } catch (e) {
-                            console.error("Error starting game:", e);
-                            statusElement.textContent = 'Error starting game: ' + e.message;
-                        }
-                    }, 100);
-                } catch (e) {
-                    console.error("Runtime initialization error:", e);
-                    document.getElementById('status').textContent = 'Initialization error: ' + e.message;
+            setStatus: function(text) {
+                var statusElement = document.getElementById('status');
+                if (statusElement) {
+                    statusElement.textContent = text;
                 }
             },
 
             printErr: function(text) {
                 console.error(text);
-                document.getElementById('status').textContent = 'Error: ' + text;
-            },
-            
-            setStatus: function(text) {
-                document.getElementById('status').textContent = text;
+                this.setStatus('Error: ' + text);
             }
         };
-
-        // Load the script
-        function loadScript() {
-            return new Promise((resolve, reject) => {
-                var script = document.createElement('script');
-                script.src = 'aisnake_web.js';
-                script.onload = resolve;
-                script.onerror = () => reject(new Error("Failed to load script"));
-                document.body.appendChild(script);
-            });
-        }
-
-        // Initialize everything
-        document.getElementById('status').classList.remove('hidden');
-        loadScript()
-            .then(() => console.log("Script loaded successfully"))
-            .catch(err => {
-                console.error("Script loading failed:", err);
-                document.getElementById('status').textContent = 'Failed to load game script: ' + err.message;
-            });
     </script>
 </body>
 </html>
