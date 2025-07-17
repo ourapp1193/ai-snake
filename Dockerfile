@@ -1,39 +1,29 @@
-cmake_minimum_required(VERSION 3.15)
-project(AISnake)
+# Stage 1: Build with Emscripten
+FROM emscripten/emsdk:3.1.45 as builder
 
-set(CMAKE_CXX_STANDARD 17)
+WORKDIR /app
+COPY . .
 
-if(EMSCRIPTEN)
-    set(CMAKE_EXECUTABLE_SUFFIX ".html")
-    
-    # These flags must be set as linker flags, not compile options
-    set(CMAKE_EXE_LINKER_FLAGS 
-        "${CMAKE_EXE_LINKER_FLAGS} -sUSE_SDL=2")
-    set(CMAKE_EXE_LINKER_FLAGS 
-        "${CMAKE_EXE_LINKER_FLAGS} -sUSE_WEBGL2=1")
-    set(CMAKE_EXE_LINKER_FLAGS 
-        "${CMAKE_EXE_LINKER_FLAGS} -sALLOW_MEMORY_GROWTH=1")
-    set(CMAKE_EXE_LINKER_FLAGS 
-        "${CMAKE_EXE_LINKER_FLAGS} --shell-file ${CMAKE_SOURCE_DIR}/shell.html")
-    set(CMAKE_EXE_LINKER_FLAGS 
-        "${CMAKE_EXE_LINKER_FLAGS} -sEXPORTED_FUNCTIONS=['_main','_getExplorationRate','_beforeUnloadHandler']")
-    set(CMAKE_EXE_LINKER_FLAGS 
-        "${CMAKE_EXE_LINKER_FLAGS} -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']")
-    set(CMAKE_EXE_LINKER_FLAGS
-        "${CMAKE_EXE_LINKER_FLAGS} -sINITIAL_MEMORY=64MB")
-    set(CMAKE_EXE_LINKER_FLAGS
-        "${CMAKE_EXE_LINKER_FLAGS} -sSAFE_HEAP=1")
-        
-    # Compiler flags
-    add_compile_options(-O3 -sASSERTIONS=1 -sDEMANGLE_SUPPORT=1)
-else()
-    find_package(SDL2 REQUIRED)
-    add_compile_options(-O3)
-    include_directories(${SDL2_INCLUDE_DIRS})
-endif()
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y cmake ninja-build && \
+    rm -rf /var/lib/apt/lists/*
 
-add_executable(aisnake_web src/main.cpp)
+# Build
+RUN mkdir -p build && \
+    cd build && \
+    emcmake cmake .. -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_TOOLCHAIN_FILE=/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake && \
+    cmake --build . --verbose
 
-if(NOT EMSCRIPTEN)
-    target_link_libraries(aisnake_web ${SDL2_LIBRARIES})
-endif()
+# Stage 2: Serve with Nginx
+FROM nginx:1.25-alpine
+
+COPY --from=builder /app/build/aisnake_web.js /usr/share/nginx/html/
+COPY --from=builder /app/build/aisnake_web.wasm /usr/share/nginx/html/
+COPY --from=builder /app/build/aisnake_web.html /usr/share/nginx/html/index.html
+COPY shell.html /usr/share/nginx/html/
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
