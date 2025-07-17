@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html>
-
 <head>
     <meta charset="utf-8">
     <title>AI Snake Training</title>
@@ -13,109 +12,165 @@
             background-color: #222;
             color: white;
         }
-
         #container {
             display: flex;
+            flex-direction: column;
+            align-items: center;
             width: 100%;
         }
-
         #status {
             text-align: center;
             margin-bottom: 20px;
             padding: 10px;
             background: #333;
             border-radius: 5px;
+            min-height: 24px;
         }
-
         #game-canvas {
             display: block;
             margin: 20px auto;
             background: black;
+            border: 2px solid #444;
         }
-
         #loading {
             text-align: center;
             margin: 20px;
             font-size: 18px;
         }
-
         #chart-container {
             display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
             margin-top: 20px;
+            width: 100%;
+            max-width: 1200px;
         }
-
-        .chart {
-            height: 130px;
+        .chart-container {
+            width: 400px;
+            height: 300px;
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
         }
-
         .hidden {
             display: none;
         }
     </style>
 </head>
-
 <body>
-    <div id="status" class="hidden">Loading game...</div>
     <div id="container">
-
+        <h1>AI Snake Training</h1>
+        <div id="status">Initializing...</div>
         <canvas id="game-canvas" width="400" height="400" class="hidden"></canvas>
         <div id="chart-container" class="hidden">
-            <div class="chart">
+            <div class="chart-container">
                 <canvas id="scoreChart"></canvas>
             </div>
-            <div class="chart">
+            <div class="chart-container">
                 <canvas id="qValueChart"></canvas>
             </div>
-            <div class="chart">
+            <div class="chart-container">
                 <canvas id="lifetimeChart"></canvas>
             </div>
         </div>
     </div>
 
     <script>
+        // Configure the Emscripten module with proper error handling
         var Module = {
-            canvas: (function () {
+            canvas: (function() {
                 var canvas = document.getElementById('game-canvas');
-                canvas.addEventListener('webglcontextlost', function (e) {
-                    alert('WebGL context lost. Please reload the page.');
+                // Ensure canvas has proper dimensions
+                canvas.width = 400;
+                canvas.height = 400;
+                
+                // Error handling for WebGL/Canvas
+                canvas.addEventListener('webglcontextlost', function(e) {
+                    console.error('WebGL context lost');
+                    document.getElementById('status').textContent = 'WebGL context lost. Reloading...';
                     e.preventDefault();
+                    setTimeout(() => location.reload(), 1000);
                 }, false);
+                
                 return canvas;
             })(),
-
-            onRuntimeInitialized: function () {
-                // Hide loading indicator
-                var loadingElement = document.getElementById('loading');
-                if (loadingElement) loadingElement.classList.add('hidden');
-
-                // Show game elements
-                var statusElement = document.getElementById('status');
-                var canvasElement = document.getElementById('game-canvas');
-                var chartContainer = document.getElementById('chart-container');
-
-                if (statusElement) {
-                    statusElement.classList.remove('hidden');
-                    statusElement.textContent = 'Game loaded - training started';
-                }
-
-                if (canvasElement) {
-                    canvasElement.classList.remove('hidden');
-                }
-
-                if (chartContainer) {
-                    chartContainer.classList.remove('hidden');
-                }
+            
+            onRuntimeInitialized: function() {
+                console.log('WASM module initialized');
+                document.getElementById('game-canvas').classList.remove('hidden');
+                document.getElementById('chart-container').classList.remove('hidden');
+                document.getElementById('status').textContent = 'Training in progress...';
+                
+                // Initialize charts
+                initCharts();
             },
-
-            printErr: function (text) {
+            
+            print: function(text) {
+                console.log(text);
+            },
+            
+            printErr: function(text) {
                 console.error(text);
-                var statusElement = document.getElementById('status');
-                if (statusElement) statusElement.textContent = 'Error: ' + text;
+                document.getElementById('status').textContent = 'Error: ' + text;
+                document.getElementById('status').style.color = '#ff5555';
+            },
+            
+            onAbort: function(reason) {
+                console.error('WASM aborted:', reason);
+                document.getElementById('status').textContent = 'Game crashed: ' + reason;
+                document.getElementById('status').style.color = '#ff5555';
+            },
+            
+            totalDependencies: 0,
+            monitorRunDependencies: function(left) {
+                this.totalDependencies = Math.max(this.totalDependencies, left);
+                document.getElementById('status').textContent = 
+                    'Loading... (' + (this.totalDependencies - left) + '/' + this.totalDependencies + ')';
             }
         };
+        
+        // Initialize Chart.js visualizations
+        function initCharts() {
+            window.scoreChart = new Chart(document.getElementById('scoreChart'), {
+                type: 'line',
+                data: { labels: [], datasets: [{
+                    label: 'Score',
+                    data: [],
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1,
+                    fill: false
+                }]},
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+            
+            window.qValueChart = new Chart(document.getElementById('qValueChart'), {
+                type: 'line',
+                data: { labels: [], datasets: [{
+                    label: 'Avg Q-Value',
+                    data: [],
+                    borderColor: 'rgba(153, 102, 255, 1)',
+                    borderWidth: 1,
+                    fill: false
+                }]},
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+            
+            window.lifetimeChart = new Chart(document.getElementById('lifetimeChart'), {
+                type: 'line',
+                data: { labels: [], datasets: [{
+                    label: 'Lifetime Score',
+                    data: [],
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 1,
+                    fill: false
+                }]},
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        }
     </script>
 
-    {{{ SCRIPT }}}
+    <!-- Replace with your actual compiled script -->
+    <script src="aisnake_web.js"></script>
 </body>
-
 </html>
