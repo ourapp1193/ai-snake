@@ -631,10 +631,20 @@ int main() {
     srand((unsigned)time(nullptr));
 
     #ifdef __EMSCRIPTEN__
+    // Initialize Emscripten-specific features
     export_functions();
     initChartJS();
+    
+    // Debug output
+    EM_ASM(
+        console.log("Starting Emscripten application...");
+        if (typeof SDL2 === 'undefined') {
+            console.error("SDL2 is not available!");
+        }
+    );
     #endif
 
+    // Initialize game state
     auto all_positions = generateAllPositions();
     game.body = {{HEIGHT/2, WIDTH/2}};
     game.trail = {{HEIGHT/2, WIDTH/2}};
@@ -645,11 +655,56 @@ int main() {
     }
 
     initQTable();
+
+    // Enhanced SDL initialization with error reporting
+    #ifdef __EMSCRIPTEN__
+    EM_ASM(console.log("Initializing SDL..."));
+    #endif
+
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        #ifdef __EMSCRIPTEN__
+        EM_ASM(
+            console.error("SDL_Init failed: " + UTF8ToString($0));
+        , SDL_GetError());
+        #else
+        cerr << "SDL_Init Error: " << SDL_GetError() << endl;
+        #endif
+        return 1;
+    }
+
+    #ifdef __EMSCRIPTEN__
+    // Create canvas (important for Emscripten)
+    EM_ASM(
+        try {
+            Module.canvas = document.getElementById('game-canvas');
+            if (!Module.canvas) {
+                console.error("Canvas element not found!");
+            } else {
+                console.log("Canvas successfully accessed");
+            }
+        } catch(e) {
+            console.error("Canvas access error:", e);
+        }
+    );
+    #endif
+
+    // Initialize SDL window and renderer
     initSDL();
 
     #ifdef __EMSCRIPTEN__
+    // Verify WebGL context
+    EM_ASM(
+        if (!Module.ctx) {
+            console.error("WebGL context not created!");
+        } else {
+            console.log("WebGL context successfully created");
+        }
+    );
+
+    // Start main loop
     emscripten_set_main_loop(mainLoop, 0, 1);
     #else
+    // Native version
     int direction = rand() % 4;
     int reset_timer = 0;
     
