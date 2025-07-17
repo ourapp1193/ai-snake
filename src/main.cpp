@@ -86,14 +86,15 @@ void cleanupBeforeUnload();
 void initializeGame();
 
 #ifdef __EMSCRIPTEN__
-void updateCharts(int episode, int score, float avg_q, float exploration, int lifetime_score);
+extern "C" void updateCharts(int episode, int score, float avg_q, float exploration, int lifetime_score);
 #else
-void updateCharts(int episode, int score, float avg_q, float exploration, int lifetime_score) {
-    cout << "Episode: " << episode 
-         << " | Score: " << score 
-         << " | Lifetime: " << lifetime_score
-         << " | Avg Q: " << avg_q
-         << " | Exploration: " << exploration << endl;
+// Provide a dummy implementation for native builds
+extern "C" void updateCharts(int episode, int score, float avg_q, float exploration, int lifetime_score) {
+    std::cout << "Episode: " << episode 
+              << " | Score: " << score 
+              << " | Lifetime: " << lifetime_score
+              << " | Avg Q: " << avg_q
+              << " | Exploration: " << exploration << std::endl;
 }
 #endif
 
@@ -698,6 +699,7 @@ EM_JS(void, initChartJS, (), {
     }
 });
 
+#ifdef __EMSCRIPTEN__
 EM_JS(void, updateCharts, (int episode, int score, float avg_q, float exploration, int lifetime_score), {
     try {
         var statusElement = document.getElementById('status');
