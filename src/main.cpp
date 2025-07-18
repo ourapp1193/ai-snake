@@ -43,11 +43,11 @@ struct GameState {
 // Q-learning parameters
 struct QLearning {
     vector<vector<float>> table;
-    float learning_rate = 0.1f;
-    float discount_factor = 0.95f;
+    float learning_rate = 0.2f;  // Increased learning rate
+    float discount_factor = 0.9f; // Slightly reduced discount factor
     float exploration_rate = 1.0f;
     int episodes = 0;
-    const float exploration_decay = 0.9999f;
+    const float exploration_decay = 0.99995f; // More aggressive decay
 };
 
 // Performance tracking
@@ -74,10 +74,11 @@ SDLResources sdl;
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed);
 vector<int> findSafeDirections(int x, int y, int current_dir);
 bool isDangerousMove(int x, int y, int dir);
+bool isImmediateDanger(int x, int y);
 
 // Function to get dynamic minimum exploration
 float getMinExploration() {
-    return q_learning.episodes < 1000000 ? 0.001f : 0.0001f;
+    return q_learning.episodes < 1000000 ? 0.0005f : 0.00005f; // Lower minimum exploration
 }
 
 #ifdef __EMSCRIPTEN__
@@ -157,7 +158,7 @@ EM_JS(void, updateCharts, (int episode, int score, float avg_q, float exploratio
         var statusElement = document.getElementById('status');
         if (statusElement) {
             statusElement.innerHTML = 
-                `Episode: ${episode} | Score: ${score} | Lifetime: ${lifetime_score} | Avg Q: ${avg_q.toFixed(2)} | Exploration: ${exploration.toFixed(4)}`;
+                `Episode: ${episode} | Score: ${score} | Lifetime: ${lifetime_score} | Avg Q: ${avg_q.toFixed(2)} | Exploration: ${exploration.toFixed(5)}`;
         }
         
         if (window.scoreChart && window.qValueChart && window.lifetimeChart) {
@@ -222,7 +223,8 @@ bool isBodyPosition(int x, int y, bool include_head = true) {
 }
 
 void initQTable() {
-    q_learning.table.resize(WIDTH * HEIGHT * 128);
+    // Increased state space to better represent dangerous situations
+    q_learning.table.resize(WIDTH * HEIGHT * 256);
     for (auto& row : q_learning.table) {
         row.assign(4, 0.0f);
     }
@@ -231,23 +233,51 @@ void initQTable() {
 int getStateIndex(int x, int y, int dir) {
     if (!isValidPosition(x, y)) return 0;
     
+    // More detailed food direction representation
     int food_dir = 0;
-    if (game.food_x > x) food_dir = 1;
-    else if (game.food_x < x) food_dir = 2;
-    if (game.food_y > y) food_dir |= 4;
-    else if (game.food_y < y) food_dir |= 8;
+    int dx = game.food_x - x;
+    int dy = game.food_y - y;
     
+    if (dx > 0) food_dir |= 1;      // Food is below
+    else if (dx < 0) food_dir |= 2; // Food is above
+    
+    if (dy > 0) food_dir |= 4;      // Food is right
+    else if (dy < 0) food_dir |= 8; // Food is left
+    
+    // More detailed danger representation
     int danger = 0;
-    if (!isValidPosition(x-1, y) || isBodyPosition(x-1, y, false)) danger |= 1;
-    if (!isValidPosition(x+1, y) || isBodyPosition(x+1, y, false)) danger |= 2;
-    if (!isValidPosition(x, y-1) || isBodyPosition(x, y-1, false)) danger |= 4;
-    if (!isValidPosition(x, y+1) || isBodyPosition(x, y+1, false)) danger |= 8;
+    if (!isValidPosition(x-1, y) || isBodyPosition(x-1, y, false)) danger |= 1;   // Up blocked
+    if (!isValidPosition(x+1, y) || isBodyPosition(x+1, y, false)) danger |= 2;   // Down blocked
+    if (!isValidPosition(x, y-1) || isBodyPosition(x, y-1, false)) danger |= 4;   // Left blocked
+    if (!isValidPosition(x, y+1) || isBodyPosition(x, y+1, false)) danger |= 8;   // Right blocked
     
-    return (y * WIDTH + x) * 128 + dir * 32 + food_dir * 4 + danger;
+    // Additional danger info for diagonal positions
+    if (!isValidPosition(x-1, y-1) || isBodyPosition(x-1, y-1, false)) danger |= 16;
+    if (!isValidPosition(x-1, y+1) || isBodyPosition(x-1, y+1, false)) danger |= 32;
+    if (!isValidPosition(x+1, y-1) || isBodyPosition(x+1, y-1, false)) danger |= 64;
+    if (!isValidPosition(x+1, y+1) || isBodyPosition(x+1, y+1, false)) danger |= 128;
+    
+    return (y * WIDTH + x) * 256 + dir * 64 + food_dir * 8 + danger;
+}
+
+bool isImmediateDanger(int x, int y) {
+    // Check if current position is adjacent to body segments
+    vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    int danger_count = 0;
+    
+    for (const auto& dir : directions) {
+        int nx = x + dir.first;
+        int ny = y + dir.second;
+        
+        if (!isValidPosition(nx, ny) || isBodyPosition(nx, ny, false)) {
+            danger_count++;
+        }
+    }
+    
+    return danger_count >= 2; // Consider it dangerous if 2 or more sides are blocked
 }
 
 bool isDangerousMove(int x, int y, int dir) {
-    // Check if moving in this direction would trap the snake between body segments
     vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     
     // Calculate new position after move
@@ -255,6 +285,9 @@ bool isDangerousMove(int x, int y, int dir) {
     int new_y = y + directions[dir].second;
     
     if (!isValidPosition(new_x, new_y)) return true;
+    
+    // Immediate collision check
+    if (isBodyPosition(new_x, new_y, false)) return true;
     
     // Check if the new position is surrounded by body segments
     int blocked_sides = 0;
@@ -267,13 +300,12 @@ bool isDangerousMove(int x, int y, int dir) {
         }
     }
     
-    // If 3 sides are blocked, it's a dangerous move
+    // If 3 sides are blocked, it's extremely dangerous
     if (blocked_sides >= 3) {
         return true;
     }
     
     // Check if this move would create a situation where the snake is between body segments
-    // with no way out
     bool has_escape = false;
     for (int i = 0; i < 4; i++) {
         if (i == dir) continue; // Skip current direction
@@ -287,6 +319,11 @@ bool isDangerousMove(int x, int y, int dir) {
         }
     }
     
+    // Also check if current position is dangerous
+    if (isImmediateDanger(x, y)) {
+        return true;
+    }
+    
     return !has_escape;
 }
 
@@ -294,6 +331,7 @@ vector<int> findSafeDirections(int x, int y, int current_dir) {
     vector<int> safe_directions;
     vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     
+    // First pass: find completely safe directions
     for (int i = 0; i < 4; i++) {
         int new_x = x + directions[i].first;
         int new_y = y + directions[i].second;
@@ -305,14 +343,41 @@ vector<int> findSafeDirections(int x, int y, int current_dir) {
         }
     }
     
-    // If no safe directions, try to find the least dangerous one
+    // If no completely safe directions, try to find the least dangerous one
     if (safe_directions.empty()) {
+        vector<pair<int, int>> danger_scores;
         for (int i = 0; i < 4; i++) {
             int new_x = x + directions[i].first;
             int new_y = y + directions[i].second;
             
             if (isValidPosition(new_x, new_y)) {
-                safe_directions.push_back(i);
+                int danger_score = 0;
+                // Check adjacent positions
+                for (int j = 0; j < 4; j++) {
+                    int nx = new_x + directions[j].first;
+                    int ny = new_y + directions[j].second;
+                    
+                    if (!isValidPosition(nx, ny) || isBodyPosition(nx, ny, false)) {
+                        danger_score++;
+                    }
+                }
+                danger_scores.emplace_back(i, danger_score);
+            }
+        }
+        
+        if (!danger_scores.empty()) {
+            // Sort by least dangerous
+            sort(danger_scores.begin(), danger_scores.end(), 
+                [](const pair<int, int>& a, const pair<int, int>& b) {
+                    return a.second < b.second;
+                });
+            
+            // Take all directions with the lowest danger score
+            int min_danger = danger_scores[0].second;
+            for (const auto& ds : danger_scores) {
+                if (ds.second == min_danger) {
+                    safe_directions.push_back(ds.first);
+                }
             }
         }
     }
@@ -340,6 +405,7 @@ int chooseAction(int x, int y, int current_dir) {
         vector<int> safe_directions = findSafeDirections(x, y, current_dir);
         if (safe_directions.empty()) return current_dir;
         
+        // Find the best action among safe directions
         int best_action = safe_directions[0];
         float best_value = q_learning.table[state][best_action];
         
@@ -348,6 +414,11 @@ int chooseAction(int x, int y, int current_dir) {
             if (q_learning.table[state][action] > best_value) {
                 best_value = q_learning.table[state][action];
                 best_action = action;
+            } else if (q_learning.table[state][action] == best_value) {
+                // If equal Q-values, prefer the direction that's not dangerous
+                if (!isDangerousMove(x, y, action) && isDangerousMove(x, y, best_action)) {
+                    best_action = action;
+                }
             }
         }
         
@@ -366,18 +437,29 @@ void updateQTable(int old_state, int action, int new_state, float reward) {
         new_state >= 0 && new_state < q_learning.table.size()) {
         float best_future = *max_element(q_learning.table[new_state].begin(), 
                                        q_learning.table[new_state].end());
-        q_learning.table[old_state][action] = 
-            (1 - q_learning.learning_rate) * q_learning.table[old_state][action] +
-            q_learning.learning_rate * (reward + q_learning.discount_factor * best_future);
+        // Apply reward shaping based on danger
+        if (reward < 0) {
+            // For negative rewards, apply stronger learning
+            q_learning.table[old_state][action] = 
+                (1 - q_learning.learning_rate * 2) * q_learning.table[old_state][action] +
+                q_learning.learning_rate * 2 * (reward + q_learning.discount_factor * best_future);
+        } else {
+            q_learning.table[old_state][action] = 
+                (1 - q_learning.learning_rate) * q_learning.table[old_state][action] +
+                q_learning.learning_rate * (reward + q_learning.discount_factor * best_future);
+        }
     }
 }
 
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed) {
-    if (crashed) return -100.0f;
-    if (got_food) return 50.0f;
+    if (crashed) return -200.0f; // Stronger penalty for crashing
+    if (got_food) return 100.0f; // Higher reward for getting food
     
     float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
     float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
+    
+    // Distance-based reward
+    float dist_reward = (prev_dist - new_dist) * 10.0f;
     
     // Add penalty for being near body segments
     float body_penalty = 0.0f;
@@ -385,7 +467,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
         for (int dy = -1; dy <= 1; dy++) {
             if (dx == 0 && dy == 0) continue;
             if (isBodyPosition(x + dx, y + dy, false)) {
-                body_penalty -= 10.0f;
+                body_penalty -= 15.0f; // Stronger penalty for being near body
             }
         }
     }
@@ -395,7 +477,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     if (game.trail.size() > 10) {
         for (size_t i = 0; i < game.trail.size() - 1; i++) {
             if (game.trail[i][0] == x && game.trail[i][1] == y) {
-                circle_penalty -= 5.0f * (game.trail.size() - i);
+                circle_penalty -= 10.0f * (game.trail.size() - i); // Stronger circle penalty
                 break;
             }
         }
@@ -405,7 +487,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     float danger_penalty = 0.0f;
     for (int dir = 0; dir < 4; dir++) {
         if (isDangerousMove(x, y, dir)) {
-            danger_penalty -= 20.0f;
+            danger_penalty -= 30.0f; // Much stronger penalty for dangerous moves
         }
     }
     
@@ -418,9 +500,12 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
             break;
         }
     }
-    if (new_position) exploration_reward += 2.0f;
+    if (new_position) exploration_reward += 5.0f;
     
-    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + danger_penalty + exploration_reward;
+    // Add penalty for steps without food
+    float step_penalty = -0.1f * game.steps_since_last_food;
+    
+    return dist_reward + body_penalty + circle_penalty + danger_penalty + exploration_reward + step_penalty;
 }
 
 void resetGame() {
