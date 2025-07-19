@@ -33,7 +33,7 @@ struct GameState {
     int length = 2;
     int food_x = 0, food_y = 0;
     bool crashed = false;
-    int speed = 10;
+    int speed = 2;
     vector<vector<int>> body;
     vector<vector<int>> trail;
     int lifetime_score = 0;
