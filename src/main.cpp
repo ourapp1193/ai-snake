@@ -265,7 +265,7 @@ bool isTrapped(int x, int y) {
             int nx = current.first + dir.first;
             int ny = current.second + dir.second;
             
-            if (isValidPosition(nx, ny) {
+            if (isValidPosition(nx, ny)) {
                 if (!isBodyPosition(nx, ny, false) && !visited[nx][ny]) {
                     visited[nx][ny] = true;
                     q.push({nx, ny});
