@@ -17,11 +17,11 @@ EM_JS(void, export_functions, (), {
 
 using namespace std;
 
-// Game constants - MODIFIED FOR FASTER EXECUTION
+// Game constants
 const int WIDTH = 20;
 const int HEIGHT = 20;
 const int CELL_SIZE = 20;
-const int AI_UPDATE_INTERVAL = 1;  // Changed from 5 to 1 for more frequent updates
+const int AI_UPDATE_INTERVAL = 5;
 const int LOG_INTERVAL = 100;
 const int MAX_TRAINING_EPISODES = 5000000;
 
@@ -33,21 +33,21 @@ struct GameState {
     int length = 2;
     int food_x = 0, food_y = 0;
     bool crashed = false;
-    int speed = 1;  // Changed from 10 to 1 for faster movement
+    int speed = 2;  // Increased speed
     vector<vector<int>> body;
     vector<vector<int>> trail;
     int lifetime_score = 0;
     int steps_since_last_food = 0;
 };
 
-// Q-learning parameters - MODIFIED FOR FASTER LEARNING
+// Q-learning parameters
 struct QLearning {
     vector<vector<float>> table;
-    float learning_rate = 0.2f;  // Increased from 0.1 for faster learning
+    float learning_rate = 0.1f;
     float discount_factor = 0.95f;
     float exploration_rate = 1.0f;
     int episodes = 0;
-    const float exploration_decay = 0.99995f;  // Slightly slower decay
+    const float exploration_decay = 0.9999f;
 };
 
 // Performance tracking
@@ -73,7 +73,6 @@ SDLResources sdl;
 // Forward declarations
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed);
 vector<int> findSafeDirections(int x, int y, int current_dir);
-bool isDangerousMove(int x, int y, int dir);
 
 // Function to get dynamic minimum exploration
 float getMinExploration() {
@@ -246,44 +245,6 @@ int getStateIndex(int x, int y, int dir) {
     return (y * WIDTH + x) * 128 + dir * 32 + food_dir * 4 + danger;
 }
 
-bool isDangerousMove(int x, int y, int dir) {
-    vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-    
-    int new_x = x + directions[dir].first;
-    int new_y = y + directions[dir].second;
-    
-    if (!isValidPosition(new_x, new_y)) return true;
-    
-    int blocked_sides = 0;
-    for (int i = 0; i < 4; i++) {
-        int nx = new_x + directions[i].first;
-        int ny = new_y + directions[i].second;
-        
-        if (!isValidPosition(nx, ny) || isBodyPosition(nx, ny, false)) {
-            blocked_sides++;
-        }
-    }
-    
-    if (blocked_sides >= 3) {
-        return true;
-    }
-    
-    bool has_escape = false;
-    for (int i = 0; i < 4; i++) {
-        if (i == dir) continue;
-        
-        int nx = new_x + directions[i].first;
-        int ny = new_y + directions[i].second;
-        
-        if (isValidPosition(nx, ny) && !isBodyPosition(nx, ny, false)) {
-            has_escape = true;
-            break;
-        }
-    }
-    
-    return !has_escape;
-}
-
 vector<int> findSafeDirections(int x, int y, int current_dir) {
     vector<int> safe_directions;
     vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
@@ -293,9 +254,7 @@ vector<int> findSafeDirections(int x, int y, int current_dir) {
         int new_y = y + directions[i].second;
         
         if (isValidPosition(new_x, new_y) && !isBodyPosition(new_x, new_y, false)) {
-            if (!isDangerousMove(x, y, i)) {
-                safe_directions.push_back(i);
-            }
+            safe_directions.push_back(i);
         }
     }
     
@@ -370,27 +329,30 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
     float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
     
-    // Calculate distance to nearest body part
-    float min_body_dist = WIDTH + HEIGHT;
-    for (size_t i = 1; i < game.body.size(); i++) {
-        const auto& seg = game.body[i];
-        if (seg.size() == 2) {
-            float dist = abs(x - seg[0]) + abs(y - seg[1]);
-            if (dist < min_body_dist) {
-                min_body_dist = dist;
+    // Stronger penalty for being near body segments
+    float body_penalty = 0.0f;
+    for (int dx = -2; dx <= 2; dx++) {
+        for (int dy = -2; dy <= 2; dy++) {
+            if (dx == 0 && dy == 0) continue;
+            if (isBodyPosition(x + dx, y + dy, false)) {
+                // Higher penalty for closer distances
+                float distance = sqrt(dx*dx + dy*dy);
+                body_penalty -= 15.0f / distance;
             }
         }
     }
     
-    // Body distance penalty/reward
-    float body_distance_reward = 0.0f;
-    if (min_body_dist < 3) {
-        body_distance_reward = -20.0f * (3 - min_body_dist);
-    } else if (min_body_dist > 5) {
-        body_distance_reward = 5.0f;
+    // Additional penalty if head is too close to body (distance < 2)
+    float head_body_penalty = 0.0f;
+    for (size_t i = 1; i < game.body.size(); i++) {
+        const auto& seg = game.body[i];
+        float dist = sqrt(pow(x - seg[0], 2) + pow(y - seg[1], 2);
+        if (dist < 2.0f) {
+            head_body_penalty -= 20.0f * (2.0f - dist);
+        }
     }
     
-    // Circle penalty
+    // Add penalty for moving in circles
     float circle_penalty = 0.0f;
     if (game.trail.size() > 10) {
         for (size_t i = 0; i < game.trail.size() - 1; i++) {
@@ -401,15 +363,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
         }
     }
     
-    // Danger penalty
-    float danger_penalty = 0.0f;
-    for (int dir = 0; dir < 4; dir++) {
-        if (isDangerousMove(x, y, dir)) {
-            danger_penalty -= 20.0f;
-        }
-    }
-    
-    // Exploration reward
+    // Add reward for exploring new areas
     float exploration_reward = 0.0f;
     bool new_position = true;
     for (const auto& pos : game.trail) {
@@ -420,7 +374,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     }
     if (new_position) exploration_reward += 2.0f;
     
-    return (prev_dist - new_dist) * 5.0f + body_distance_reward + circle_penalty + danger_penalty + exploration_reward;
+    return (prev_dist - new_dist) * 5.0f + body_penalty + head_body_penalty + circle_penalty + exploration_reward;
 }
 
 void resetGame() {
@@ -549,8 +503,7 @@ void initSDL() {
     }
 
     sdl.renderer = SDL_CreateRenderer(sdl.window, -1, 
-                                    SDL_RENDERER_ACCELERATED | 
-                                    SDL_RENDERER_PRESENTVSYNC);
+                                    SDL_RENDERER_ACCELERATED);
     if (!sdl.renderer) {
         cerr << "SDL_CreateRenderer Error: " << SDL_GetError() << endl;
         SDL_DestroyWindow(sdl.window);
@@ -686,13 +639,13 @@ int main() {
             if (reset_timer == 0) {
                 resetGame();
             }
-            SDL_Delay(game.speed);  // Now uses the faster speed value (1ms)
+            SDL_Delay(game.speed);
             continue;
         }
 
         bool crashed = moveSnake(direction);
         drawGame();
-        SDL_Delay(game.speed);  // Now uses the faster speed value (1ms)
+        SDL_Delay(game.speed);
 
         if (q_learning.episodes < MAX_TRAINING_EPISODES) {
             q_learning.episodes++;
