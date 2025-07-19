@@ -346,7 +346,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     float head_body_penalty = 0.0f;
     for (size_t i = 1; i < game.body.size(); i++) {
         const auto& seg = game.body[i];
-        float dist = sqrt(pow(x - seg[0], 2) + pow(y - seg[1], 2);
+        float dist = sqrt(pow(x - seg[0], 2) + pow(y - seg[1], 2));
         if (dist < 2.0f) {
             head_body_penalty -= 20.0f * (2.0f - dist);
         }
