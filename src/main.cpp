@@ -247,16 +247,13 @@ int getStateIndex(int x, int y, int dir) {
 }
 
 bool isDangerousMove(int x, int y, int dir) {
-    // Check if moving in this direction would trap the snake between body segments
     vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     
-    // Calculate new position after move
     int new_x = x + directions[dir].first;
     int new_y = y + directions[dir].second;
     
     if (!isValidPosition(new_x, new_y)) return true;
     
-    // Check if the new position is surrounded by body segments
     int blocked_sides = 0;
     for (int i = 0; i < 4; i++) {
         int nx = new_x + directions[i].first;
@@ -267,16 +264,13 @@ bool isDangerousMove(int x, int y, int dir) {
         }
     }
     
-    // If 3 sides are blocked, it's a dangerous move
     if (blocked_sides >= 3) {
         return true;
     }
     
-    // Check if this move would create a situation where the snake is between body segments
-    // with no way out
     bool has_escape = false;
     for (int i = 0; i < 4; i++) {
-        if (i == dir) continue; // Skip current direction
+        if (i == dir) continue;
         
         int nx = new_x + directions[i].first;
         int ny = new_y + directions[i].second;
@@ -305,7 +299,6 @@ vector<int> findSafeDirections(int x, int y, int current_dir) {
         }
     }
     
-    // If no safe directions, try to find the least dangerous one
     if (safe_directions.empty()) {
         for (int i = 0; i < 4; i++) {
             int new_x = x + directions[i].first;
@@ -317,7 +310,6 @@ vector<int> findSafeDirections(int x, int y, int current_dir) {
         }
     }
     
-    // If still no directions, just return current direction
     if (safe_directions.empty()) {
         safe_directions.push_back(current_dir);
     }
@@ -336,7 +328,6 @@ int chooseAction(int x, int y, int current_dir) {
 
     int state = getStateIndex(x, y, current_dir);
     if (state >= 0 && state < q_learning.table.size()) {
-        // Only consider safe directions when exploiting
         vector<int> safe_directions = findSafeDirections(x, y, current_dir);
         if (safe_directions.empty()) return current_dir;
         
@@ -379,15 +370,26 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
     float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
     
-    // Add penalty for being near body segments
-    float body_penalty = 0.0f;
-    for (int dx = -1; dx <= 1; dx++) {
-        for (int dy = -1; dy <= 1; dy++) {
-            if (dx == 0 && dy == 0) continue;
-            if (isBodyPosition(x + dx, y + dy, false)) {
-                body_penalty -= 10.0f;
+    // Calculate distance to nearest body part
+    float min_body_dist = WIDTH + HEIGHT; // Initialize with max possible distance
+    for (size_t i = 1; i < game.body.size(); i++) {
+        const auto& seg = game.body[i];
+        if (seg.size() == 2) {
+            float dist = abs(x - seg[0]) + abs(y - seg[1]);
+            if (dist < min_body_dist) {
+                min_body_dist = dist;
             }
         }
+    }
+    
+    // Add penalty/reward based on distance to body
+    float body_distance_reward = 0.0f;
+    if (min_body_dist < 3) {
+        // Strong penalty for being too close to body
+        body_distance_reward = -20.0f * (3 - min_body_dist);
+    } else if (min_body_dist > 5) {
+        // Reward for maintaining safe distance
+        body_distance_reward = 5.0f;
     }
     
     // Add penalty for moving in circles
@@ -420,7 +422,8 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     }
     if (new_position) exploration_reward += 2.0f;
     
-    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + danger_penalty + exploration_reward;
+    // Combine all rewards
+    return (prev_dist - new_dist) * 5.0f + body_distance_reward + circle_penalty + danger_penalty + exploration_reward;
 }
 
 void resetGame() {
