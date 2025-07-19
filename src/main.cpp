@@ -73,6 +73,7 @@ SDLResources sdl;
 // Forward declarations
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed);
 vector<int> findSafeDirections(int x, int y, int current_dir);
+bool isTrapped(int x, int y);
 
 // Function to get dynamic minimum exploration
 float getMinExploration() {
@@ -245,6 +246,38 @@ int getStateIndex(int x, int y, int dir) {
     return (y * WIDTH + x) * 128 + dir * 32 + food_dir * 4 + danger;
 }
 
+bool isTrapped(int x, int y) {
+    // Check if the snake is in a position with no escape
+    vector<vector<bool>> visited(HEIGHT, vector<bool>(WIDTH, false));
+    queue<pair<int, int>> q;
+    q.push({x, y});
+    visited[x][y] = true;
+    
+    int reachable = 0;
+    vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    
+    while (!q.empty()) {
+        auto current = q.front();
+        q.pop();
+        reachable++;
+        
+        for (const auto& dir : directions) {
+            int nx = current.first + dir.first;
+            int ny = current.second + dir.second;
+            
+            if (isValidPosition(nx, ny) {
+                if (!isBodyPosition(nx, ny, false) && !visited[nx][ny]) {
+                    visited[nx][ny] = true;
+                    q.push({nx, ny});
+                }
+            }
+        }
+    }
+    
+    // If reachable area is less than the snake length, it's trapped
+    return reachable < game.length;
+}
+
 vector<int> findSafeDirections(int x, int y, int current_dir) {
     vector<int> safe_directions;
     vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
@@ -282,6 +315,19 @@ int chooseAction(int x, int y, int current_dir) {
     if (static_cast<float>(rand()) / RAND_MAX < q_learning.exploration_rate) {
         vector<int> safe_directions = findSafeDirections(x, y, current_dir);
         if (!safe_directions.empty()) {
+            // Prefer directions that don't lead to traps
+            vector<int> non_trapping_directions;
+            for (int dir : safe_directions) {
+                int nx = x + (dir == 0 ? -1 : dir == 1 ? 1 : 0);
+                int ny = y + (dir == 2 ? -1 : dir == 3 ? 1 : 0);
+                if (!isTrapped(nx, ny)) {
+                    non_trapping_directions.push_back(dir);
+                }
+            }
+            
+            if (!non_trapping_directions.empty()) {
+                return non_trapping_directions[rand() % non_trapping_directions.size()];
+            }
             return safe_directions[rand() % safe_directions.size()];
         }
         return rand() % 4;
@@ -293,11 +339,26 @@ int chooseAction(int x, int y, int current_dir) {
         vector<int> safe_directions = findSafeDirections(x, y, current_dir);
         if (safe_directions.empty()) return current_dir;
         
-        int best_action = safe_directions[0];
+        // Filter out directions that lead to traps
+        vector<int> non_trapping_directions;
+        for (int dir : safe_directions) {
+            int nx = x + (dir == 0 ? -1 : dir == 1 ? 1 : 0);
+            int ny = y + (dir == 2 ? -1 : dir == 3 ? 1 : 0);
+            if (!isTrapped(nx, ny)) {
+                non_trapping_directions.push_back(dir);
+            }
+        }
+        
+        // If all directions lead to traps, use the original safe directions
+        if (non_trapping_directions.empty()) {
+            non_trapping_directions = safe_directions;
+        }
+        
+        int best_action = non_trapping_directions[0];
         float best_value = q_learning.table[state][best_action];
         
-        for (size_t i = 1; i < safe_directions.size(); i++) {
-            int action = safe_directions[i];
+        for (size_t i = 1; i < non_trapping_directions.size(); i++) {
+            int action = non_trapping_directions[i];
             if (q_learning.table[state][action] > best_value) {
                 best_value = q_learning.table[state][action];
                 best_action = action;
@@ -365,7 +426,10 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     }
     if (new_position) exploration_reward += 2.0f;
     
-    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + exploration_reward;
+    // Add penalty for entering a trapped state
+    float trap_penalty = isTrapped(x, y) ? -50.0f : 0.0f;
+    
+    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + exploration_reward + trap_penalty;
 }
 
 void resetGame() {
@@ -468,7 +532,7 @@ bool moveSnake(int& direction) {
         spawnFood();
     }
 
-    if (game.steps_since_last_food > 200) {
+    if (game.steps_since_last_food > 200 || isTrapped(game.head_x, game.head_y)) {
         return true;
     }
 
