@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <queue>
 #include <cmath>
+#include <climits>  // Added for FLT_MAX
 #include <SDL/SDL.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -312,7 +313,7 @@ vector<int> findSafeDirections(int x, int y, int current_dir) {
 }
 
 int chooseAction(int x, int y, int current_dir) {
-    if (static_cast<float>(rand()) / RAND_MAX < q_learning.exploration_rate) {
+    if (static_cast<float>(rand()) / static_cast<float>(RAND_MAX) < q_learning.exploration_rate) {
         vector<int> safe_directions = findSafeDirections(x, y, current_dir);
         if (!safe_directions.empty()) {
             // Prefer directions that don't lead to traps
@@ -389,7 +390,7 @@ void updateQTable(int old_state, int action, int new_state, float reward) {
 float calculateDistanceToBody(int x, int y) {
     if (game.body.size() <= 1) return 1.0f; // No body to avoid
     
-    float min_distance = FLT_MAX;
+    float min_distance = numeric_limits<float>::max();
     for (size_t i = 1; i < game.body.size(); i++) {
         const auto& seg = game.body[i];
         if (seg.size() == 2) {
