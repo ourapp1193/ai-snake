@@ -17,11 +17,11 @@ EM_JS(void, export_functions, (), {
 
 using namespace std;
 
-// Game constants
+// Game constants - MODIFIED FOR FASTER EXECUTION
 const int WIDTH = 20;
 const int HEIGHT = 20;
 const int CELL_SIZE = 20;
-const int AI_UPDATE_INTERVAL = 5;
+const int AI_UPDATE_INTERVAL = 1;  // Changed from 5 to 1 for more frequent updates
 const int LOG_INTERVAL = 100;
 const int MAX_TRAINING_EPISODES = 5000000;
 
@@ -33,21 +33,21 @@ struct GameState {
     int length = 2;
     int food_x = 0, food_y = 0;
     bool crashed = false;
-    int speed = 2;
+    int speed = 1;  // Changed from 10 to 1 for faster movement
     vector<vector<int>> body;
     vector<vector<int>> trail;
     int lifetime_score = 0;
     int steps_since_last_food = 0;
 };
 
-// Q-learning parameters
+// Q-learning parameters - MODIFIED FOR FASTER LEARNING
 struct QLearning {
     vector<vector<float>> table;
-    float learning_rate = 0.1f;
+    float learning_rate = 0.2f;  // Increased from 0.1 for faster learning
     float discount_factor = 0.95f;
     float exploration_rate = 1.0f;
     int episodes = 0;
-    const float exploration_decay = 0.9999f;
+    const float exploration_decay = 0.99995f;  // Slightly slower decay
 };
 
 // Performance tracking
@@ -371,7 +371,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
     
     // Calculate distance to nearest body part
-    float min_body_dist = WIDTH + HEIGHT; // Initialize with max possible distance
+    float min_body_dist = WIDTH + HEIGHT;
     for (size_t i = 1; i < game.body.size(); i++) {
         const auto& seg = game.body[i];
         if (seg.size() == 2) {
@@ -382,17 +382,15 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
         }
     }
     
-    // Add penalty/reward based on distance to body
+    // Body distance penalty/reward
     float body_distance_reward = 0.0f;
     if (min_body_dist < 3) {
-        // Strong penalty for being too close to body
         body_distance_reward = -20.0f * (3 - min_body_dist);
     } else if (min_body_dist > 5) {
-        // Reward for maintaining safe distance
         body_distance_reward = 5.0f;
     }
     
-    // Add penalty for moving in circles
+    // Circle penalty
     float circle_penalty = 0.0f;
     if (game.trail.size() > 10) {
         for (size_t i = 0; i < game.trail.size() - 1; i++) {
@@ -403,7 +401,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
         }
     }
     
-    // Add penalty for dangerous moves
+    // Danger penalty
     float danger_penalty = 0.0f;
     for (int dir = 0; dir < 4; dir++) {
         if (isDangerousMove(x, y, dir)) {
@@ -411,7 +409,7 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
         }
     }
     
-    // Add reward for exploring new areas
+    // Exploration reward
     float exploration_reward = 0.0f;
     bool new_position = true;
     for (const auto& pos : game.trail) {
@@ -422,7 +420,6 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     }
     if (new_position) exploration_reward += 2.0f;
     
-    // Combine all rewards
     return (prev_dist - new_dist) * 5.0f + body_distance_reward + circle_penalty + danger_penalty + exploration_reward;
 }
 
@@ -689,13 +686,13 @@ int main() {
             if (reset_timer == 0) {
                 resetGame();
             }
-            SDL_Delay(game.speed);
+            SDL_Delay(game.speed);  // Now uses the faster speed value (1ms)
             continue;
         }
 
         bool crashed = moveSnake(direction);
         drawGame();
-        SDL_Delay(game.speed);
+        SDL_Delay(game.speed);  // Now uses the faster speed value (1ms)
 
         if (q_learning.episodes < MAX_TRAINING_EPISODES) {
             q_learning.episodes++;
