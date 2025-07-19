@@ -386,6 +386,22 @@ void updateQTable(int old_state, int action, int new_state, float reward) {
     }
 }
 
+float calculateDistanceToBody(int x, int y) {
+    if (game.body.size() <= 1) return 1.0f; // No body to avoid
+    
+    float min_distance = FLT_MAX;
+    for (size_t i = 1; i < game.body.size(); i++) {
+        const auto& seg = game.body[i];
+        if (seg.size() == 2) {
+            float dist = sqrt(pow(x - seg[0], 2) + pow(y - seg[1], 2));
+            if (dist < min_distance) {
+                min_distance = dist;
+            }
+        }
+    }
+    return min_distance;
+}
+
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed) {
     if (crashed) return -100.0f;
     if (got_food) return 50.0f;
@@ -403,6 +419,10 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
             }
         }
     }
+    
+    // Add reward for keeping distance from body
+    float body_distance = calculateDistanceToBody(x, y);
+    float distance_reward = body_distance * 0.5f; // Reward proportional to distance
     
     // Add penalty for moving in circles
     float circle_penalty = 0.0f;
@@ -429,7 +449,8 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     // Add penalty for entering a trapped state
     float trap_penalty = isTrapped(x, y) ? -50.0f : 0.0f;
     
-    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + exploration_reward + trap_penalty;
+    return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + 
+           exploration_reward + trap_penalty + distance_reward;
 }
 
 void resetGame() {
