@@ -554,7 +554,7 @@ bool moveSnake(int& direction) {
         spawnFood();
     }
 
-    if (game.steps_since_last_food > 200 || isTrapped(game.head_x, game.head_y)) {
+    if (game.steps_since_last_food > 2000000 || isTrapped(game.head_x, game.head_y)) {
         return true;
     }
 
