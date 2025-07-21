@@ -410,27 +410,27 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
     float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
     float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
     
-    // Add penalty for being near body segments
+    // Stronger penalty for being near body segments
     float body_penalty = 0.0f;
     for (int dx = -1; dx <= 1; dx++) {
         for (int dy = -1; dy <= 1; dy++) {
             if (dx == 0 && dy == 0) continue;
             if (isBodyPosition(x + dx, y + dy, false)) {
-                body_penalty -= 10.0f;
+                body_penalty -= 20.0f; // Increased from 10 to 20
             }
         }
     }
     
     // Add reward for keeping distance from body
     float body_distance = calculateDistanceToBody(x, y);
-    float distance_reward = body_distance * 0.5f; // Reward proportional to distance
+    float distance_reward = body_distance * 1.0f; // Increased from 0.5f
     
     // Add penalty for moving in circles
     float circle_penalty = 0.0f;
     if (game.trail.size() > 10) {
         for (size_t i = 0; i < game.trail.size() - 1; i++) {
             if (game.trail[i][0] == x && game.trail[i][1] == y) {
-                circle_penalty -= 5.0f * (game.trail.size() - i);
+                circle_penalty -= 10.0f * (game.trail.size() - i); // Increased from 5.0f
                 break;
             }
         }
@@ -445,10 +445,10 @@ float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool 
             break;
         }
     }
-    if (new_position) exploration_reward += 2.0f;
+    if (new_position) exploration_reward += 3.0f; // Increased from 2.0f
     
     // Add penalty for entering a trapped state
-    float trap_penalty = isTrapped(x, y) ? -50.0f : 0.0f;
+    float trap_penalty = isTrapped(x, y) ? -100.0f : 0.0f; // Increased from -50.0f
     
     return (prev_dist - new_dist) * 5.0f + body_penalty + circle_penalty + 
            exploration_reward + trap_penalty + distance_reward;
