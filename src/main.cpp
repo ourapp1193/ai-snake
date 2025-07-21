@@ -48,7 +48,7 @@ struct QLearning {
     float discount_factor = 0.95f;
     float exploration_rate = 1.0f;
     int episodes = 0;
-    const float exploration_decay = 0.9999f;
+    const float exploration_decay = 0.99999f;
 };
 
 // Performance tracking
@@ -78,7 +78,7 @@ bool isTrapped(int x, int y);
 
 // Function to get dynamic minimum exploration
 float getMinExploration() {
-    return q_learning.episodes < 1000000 ? 0.001f : 0.0001f;
+    return 0.01f;
 }
 
 #ifdef __EMSCRIPTEN__
