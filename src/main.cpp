@@ -405,7 +405,7 @@ float calculateDistanceToBody(int x, int y) {
 
 float calculateReward(int prev_x, int prev_y, int x, int y, bool got_food, bool crashed) {
     if (crashed) return -100.0f;
-    if (got_food) return 50.0f;
+    if (got_food) return 120.0f;
     
     float prev_dist = abs(prev_x - game.food_x) + abs(prev_y - game.food_y);
     float new_dist = abs(x - game.food_x) + abs(y - game.food_y);
